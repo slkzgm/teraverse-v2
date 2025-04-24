@@ -1,7 +1,13 @@
 // path: src/actions/gigaverseActions.ts
 'use server'
 
-import { DungeonData, GameClient, GameItemBalanceChange } from '@slkzgm/gigaverse-sdk'
+import {
+  BaseResponse,
+  DungeonData,
+  GameClient,
+  GameItemBalanceChange,
+  StartRunPayload,
+} from '@slkzgm/gigaverse-sdk'
 
 function createClient(token: string) {
   return new GameClient('https://gigaverse.io', token)
@@ -188,6 +194,58 @@ export async function fetchDungeonState(token: string): Promise<{
   }
 }
 
+export async function startRunAction(
+  token: string,
+  dungeonId: number
+): Promise<{
+  success: boolean
+  data: DungeonData | null
+  actionToken?: string | number
+  message?: string
+  error?: string
+}> {
+  console.log('[startRunAction] Starting run for dungeonId:', dungeonId)
+  try {
+    const client = createClient(token)
+
+    const payload: StartRunPayload = {
+      actionToken: '',
+      dungeonId,
+      data: {
+        consumables: [],
+        itemId: 0,
+        index: 0,
+      },
+    }
+
+    const result: BaseResponse = await client.startRun(payload)
+    if (!result.success) {
+      return {
+        success: false,
+        data: null,
+        actionToken: result.actionToken,
+        message: result.message || 'Run failed to start',
+        error: 'Server responded with success=false',
+      }
+    }
+
+    return {
+      success: true,
+      data: (result.data as DungeonData) || null,
+      actionToken: result.actionToken,
+      message: result.message,
+    }
+  } catch (err: unknown) {
+    console.error('[startRunAction] Error:', err)
+    return {
+      success: false,
+      data: null,
+      message: 'Failed to start run',
+      error: err instanceof Error ? err.message : 'Unknown error',
+    }
+  }
+}
+
 export async function playMove(
   token: string,
   actionToken: string | null,
@@ -203,6 +261,7 @@ export async function playMove(
 }> {
   try {
     const client = createClient(token)
+    console.log(`[PlayMove] ${move}, ${token}, ${actionToken}, ${dungeonId}`)
     const {
       actionToken: newActionToken,
       data,
@@ -237,4 +296,14 @@ export async function playMove(
       error: err instanceof Error ? err.message : 'Unknown error occurred in playMove',
     }
   }
+}
+
+export async function getAllEnemiesAction(token: string) {
+  const client = createClient(token)
+  return client.getAllEnemies()
+}
+
+export async function getAllGameItemsAction(token: string) {
+  const client = createClient(token)
+  return client.getAllGameItems()
 }

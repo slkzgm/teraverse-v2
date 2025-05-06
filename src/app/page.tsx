@@ -24,7 +24,7 @@ export default function HomePage() {
   const { setUserData, clearUserData } = useGigaverseStore()
 
   // Local states
-  const [tokenInput, setTokenInput] = useState('')
+  const [authTokenInput, setAuthTokenInput] = useState('')
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
@@ -37,19 +37,19 @@ export default function HomePage() {
   async function handleBearerSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
-    if (!tokenInput.trim()) {
+    if (!authTokenInput.trim()) {
       setError('Please provide a valid Bearer token.')
       return
     }
 
     setIsLoading(true)
     try {
-      const result = await validateTokenAction(tokenInput)
+      const result = await validateTokenAction(authTokenInput)
       if (!result.success || !result.address || !result.canEnterGame) {
         throw new Error(result.message || 'Invalid token or cannot access game.')
       }
       const oneHourLater = Date.now() + 60 * 60 * 1000
-      setAuthData(tokenInput, oneHourLater)
+      setAuthData(authTokenInput, oneHourLater)
       setUserData(result.address, result.username ?? '', result.noobId ?? '')
 
       router.push('/dashboard')
@@ -111,7 +111,7 @@ export default function HomePage() {
   function handleDisconnect() {
     clearAuthData()
     clearUserData()
-    setTokenInput('')
+    setAuthTokenInput('')
     setError('')
   }
 
@@ -125,8 +125,8 @@ export default function HomePage() {
         <input
           type="text"
           placeholder="Bearer token..."
-          value={tokenInput}
-          onChange={(e) => setTokenInput(e.target.value)}
+          value={authTokenInput}
+          onChange={(e) => setAuthTokenInput(e.target.value)}
           disabled={isLoading}
         />
         <button type="submit" disabled={isLoading}>

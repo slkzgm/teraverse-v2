@@ -1,10 +1,9 @@
 // path: src/app/dashboard/page.tsx
+
 'use client'
 
 import React, { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-
-// Actions
 import {
   validateTokenAction,
   fetchDungeonState,
@@ -12,30 +11,19 @@ import {
   startRunAction,
 } from '@/actions/gigaverseActions'
 import { callGigaverseAction } from '@/utils/callGigaverseAction'
-
-// Stores
 import { useAuthStore } from '@/store/useAuthStore'
 import { useGigaverseStore } from '@/store/useGigaverseStore'
 import { useAlgorithmStore } from '@/store/useAlgorithmStore'
 import { useGameDataStore } from '@/store/useGameDataStore'
-
-// UI
 import AlgorithmSelector from '@/components/algorithm-selector'
 import {
   MctsAlgorithm,
   type GigaverseActionType,
-  buildGigaverseRunState
+  buildGigaverseRunState,
 } from '@slkzgm/gigaverse-engine'
 import { silentLogger } from '@/utils/silentLogger'
-
-// Types from the SDK
-import type { GameItemBalanceChange, DungeonData } from '@slkzgm/gigaverse-sdk'
-
-/** MCTS configuration if user picks 'mcts'. */
-const mctsConfig = {
-  simulationsCount: 300,
-  maxDepth: 2,
-}
+import type { GameItemBalanceChange, DungeonData, LootOption } from '@slkzgm/gigaverse-sdk'
+import { AggregatedChangesPanel } from '@/components/dashboard/aggregated-changes-panel'
 
 interface StepLog {
   userMove: string
@@ -47,43 +35,29 @@ interface StepLog {
   timestamp: number
 }
 
-/**
- * A Next.js 13 page demonstrating:
- * - Extended UI for player/enemy stats
- * - Floor/room calculation from ROOM_NUM_CID
- * - Aggregated item changes from each move
- * - Recap of chosen loot or step logs
- */
+const mctsConfig = {
+  simulationsCount: 300,
+  maxDepth: 2,
+}
+
 export default function DashboardPage() {
   const router = useRouter()
-
-  // Auth + algorithm store
   const { bearerToken, expiresAt } = useAuthStore()
+  const { dungeonState, energyData, loadEnergy, stopEnergyTimer } = useGigaverseStore()
+  const { loadOffchainStatic, enemies, gameItems, isLoading, error } = useGameDataStore()
   const { selectedAlgorithm, autoPlay, setAutoPlay } = useAlgorithmStore()
 
-  // Gigaverse store
-  const { dungeonState } = useGigaverseStore()
-
-  // Game data
-  const { enemies, items, isLoading, error, loadEnemies, loadItems } = useGameDataStore()
-
-  // Local states
+  // Local state
   const [isChecking, setIsChecking] = useState(true)
   const [localError, setLocalError] = useState('')
-
-  /**
-   * Aggregated changes across the entire run:
-   * We store every 'gameItemBalanceChanges' from each move.
-   */
   const [balanceChangesHistory, setBalanceChangesHistory] = useState<GameItemBalanceChange[]>([])
-
-  /**
-   * Step-by-step logs of each move: user's move, enemy's move, HP changes, etc.
-   */
   const [battleHistory, setBattleHistory] = useState<StepLog[]>([])
 
   // MCTS ref
   const mctsRef = useRef<MctsAlgorithm | null>(null)
+  // Tracks if we are running the auto-play loop
+  const isAutoPlayingRef = useRef(false)
+
   useEffect(() => {
     if (selectedAlgorithm === 'mcts') {
       mctsRef.current = new MctsAlgorithm(mctsConfig, silentLogger)
@@ -92,11 +66,8 @@ export default function DashboardPage() {
     }
   }, [selectedAlgorithm])
 
-  // concurrency guard
-  const isAutoPlayingRef = useRef(false)
-
   /**
-   * 1) Validate token or redirect
+   * Validate token on mount. If invalid or expired => redirect home.
    */
   useEffect(() => {
     async function checkAccess() {
@@ -120,184 +91,40 @@ export default function DashboardPage() {
   }, [bearerToken, expiresAt, router])
 
   /**
-   * 2) Load enemies/items post validation
+   * Once validated, load game data & energy, start timers, etc.
    */
   useEffect(() => {
     if (!bearerToken || isChecking) return
-    if (enemies.length === 0) loadEnemies(bearerToken)
-    if (items.length === 0) loadItems(bearerToken)
-  }, [bearerToken, isChecking, enemies, items, loadEnemies, loadItems])
 
-  // ----------------------------------------------------------------
-  // RECOMMENDED MOVE
-  // ----------------------------------------------------------------
-  function getRecommendedMove(): GigaverseActionType | null {
-    const ds = useGigaverseStore.getState().dungeonState
-    if (!ds) return null
-
-    if (selectedAlgorithm === 'manual') return null
-
-    // random
-    if (selectedAlgorithm === 'random') {
-      const possible: GigaverseActionType[] = []
-      if (ds.run?.lootPhase && ds.run.lootOptions?.length) {
-        if (ds.run.lootOptions.length >= 1) possible.push('loot_one')
-        if (ds.run.lootOptions.length >= 2) possible.push('loot_two')
-        if (ds.run.lootOptions.length >= 3) possible.push('loot_three')
-      } else {
-        possible.push('rock', 'paper', 'scissor')
-      }
-      if (possible.length === 0) return null
-      return possible[Math.floor(Math.random() * possible.length)]
+    // New single call: loadOffchainStatic
+    if (enemies.length === 0 && gameItems.length === 0) {
+      loadOffchainStatic(bearerToken)
     }
 
-    // mcts
-    if (selectedAlgorithm === 'mcts' && mctsRef.current) {
-      try {
-        const runState = buildGigaverseRunState(ds, enemies)
-        const action = mctsRef.current.pickAction(runState)
-        return action.type
-      } catch (err) {
-        console.error('[Dashboard] MCTS pickAction error:', err)
-      }
+    // Load energy (and start timers)
+    loadEnergy(bearerToken)
+    return () => {
+      stopEnergyTimer()
     }
-
-    return null
-  }
+  }, [bearerToken, isChecking, enemies, gameItems, loadOffchainStatic, loadEnergy, stopEnergyTimer])
 
   /**
-   * Single move => calls playMove => store step logs & aggregated changes
+   * Auto-fetch dungeon on mount so if a run is already in progress we display it.
    */
-  async function handlePlayMove(move: GigaverseActionType) {
-    setLocalError('')
-    const { bearerToken: currentToken } = useAuthStore.getState()
-    if (!currentToken) {
-      setLocalError('No bearer token. Please re-login.')
-      return
-    }
+  useEffect(() => {
+    if (!bearerToken || isChecking) return
 
-    // read current state to see HP before
-    const dsBefore = useGigaverseStore.getState().dungeonState
-    const userHPBefore = dsBefore?.run?.players[0].health.current ?? 0
-    const enemyHPBefore = dsBefore?.run?.players[1].health.current ?? 0
-    const dungeonId = dsBefore?.entity?.ID_CID ? parseInt(dsBefore.entity.ID_CID) : 1
-    const { actionToken } = useGigaverseStore.getState()
-
-    try {
-      const result = await callGigaverseAction(
-          playMove,
-          currentToken,
-          actionToken,
-          dungeonId,
-          move
-      )
+    async function fetchOnMount() {
+      setLocalError('')
+      const result = await callGigaverseAction(fetchDungeonState, bearerToken)
       if (!result.success) {
-        throw new Error(result.message || 'Failed to play move.')
+        setLocalError(result.message || 'Failed to fetch dungeon on mount.')
       }
-
-      // If we have balance changes, aggregate them
-      if (result.gameItemBalanceChanges && result.gameItemBalanceChanges.length > 0) {
-        setBalanceChangesHistory(prev => [...prev, ...result.gameItemBalanceChanges!])
-      }
-
-      // Now that the store is updated with the new state, read HP/moves after
-      const dsAfter = useGigaverseStore.getState().dungeonState
-      const userHPAfter = dsAfter?.run?.players[0].health.current ?? 0
-      const enemyHPAfter = dsAfter?.run?.players[1].health.current ?? 0
-      const userMove = dsAfter?.run?.players[0].lastMove || move
-      const enemyMove = dsAfter?.run?.players[1].lastMove || 'unknown'
-
-      // Record this step in battleHistory
-      const stepLog: StepLog = {
-        userMove,
-        enemyMove,
-        userHPBefore,
-        userHPAfter,
-        enemyHPBefore,
-        enemyHPAfter,
-        timestamp: Date.now()
-      }
-      setBattleHistory(prev => [...prev, stepLog])
-
-    } catch (err) {
-      console.error('[Dashboard] handlePlayMove error:', err)
-      setLocalError(err instanceof Error ? err.message : 'Move error.')
-      throw err
     }
-  }
 
-  /**
-   * Refresh => fetchDungeonState
-   */
-  async function refreshDungeon() {
-    const { bearerToken: currentToken } = useAuthStore.getState()
-    if (!currentToken) return
-    await callGigaverseAction(fetchDungeonState, currentToken)
-  }
+    fetchOnMount()
+  }, [bearerToken, isChecking])
 
-  /**
-   * If run ended => setAutoPlay(false), refresh
-   */
-  async function checkRunOverAndRefresh(): Promise<boolean> {
-    const ds = useGigaverseStore.getState().dungeonState
-    if (!ds || !ds.run) {
-      console.log('[AutoPlay] No run => ended.')
-      setAutoPlay(false)
-      await refreshDungeon()
-      return true
-    }
-    const userHP = ds.run.players[0].health.current
-    if (userHP <= 0) {
-      console.log('[AutoPlay] Player HP=0 => ended.')
-      setAutoPlay(false)
-      await refreshDungeon()
-      return true
-    }
-    if (ds.entity?.COMPLETE_CID) {
-      console.log('[AutoPlay] COMPLETE_CID => ended.')
-      setAutoPlay(false)
-      await refreshDungeon()
-      return true
-    }
-    return false
-  }
-
-  /**
-   * The chain: pick => move => short delay => repeat
-   */
-  async function runAutoPlayChain() {
-    if (isAutoPlayingRef.current) return
-    isAutoPlayingRef.current = true
-    try {
-      let steps = 60
-      while (useAlgorithmStore.getState().autoPlay && steps > 0) {
-        const ended = await checkRunOverAndRefresh()
-        if (ended) break
-
-        const move = getRecommendedMove()
-        if (!move) {
-          console.log('[AutoPlay] No recommended move => stop.')
-          break
-        }
-        console.log('[AutoPlay] Move =>', move)
-        await handlePlayMove(move)
-
-        await new Promise(r => setTimeout(r, 50))
-        steps--
-      }
-      if (steps <= 0) {
-        console.warn('[AutoPlay] Safety break => too many moves.')
-      }
-      // final check
-      await checkRunOverAndRefresh()
-    } catch (err) {
-      console.error('[AutoPlayChain] error =>', err)
-    } finally {
-      isAutoPlayingRef.current = false
-    }
-  }
-
-  // If autoPlay => run chain
   useEffect(() => {
     if (autoPlay) {
       runAutoPlayChain()
@@ -306,92 +133,247 @@ export default function DashboardPage() {
     }
   }, [autoPlay])
 
-  /**
-   * Start or fetch dungeon
-   */
-  async function handleFetchDungeon() {
-    setLocalError('')
+  // =============================
+  // Move helpers
+  // =============================
+  function getRecommendedMove(): GigaverseActionType | null {
+    const ds = useGigaverseStore.getState().dungeonState
+    if (!ds) return null
+
+    if (selectedAlgorithm === 'manual') return null
+
+    if (selectedAlgorithm === 'random') {
+      const possible: GigaverseActionType[] = []
+      if (ds.run?.lootPhase && ds.run.lootOptions?.length) {
+        ds.run.lootOptions.forEach((_, idx) => {
+          possible.push(`loot_${idx + 1}` as GigaverseActionType)
+        })
+      } else {
+        possible.push('rock', 'paper', 'scissor')
+      }
+      return possible[Math.floor(Math.random() * possible.length)]
+    }
+
+    if (selectedAlgorithm === 'mcts' && mctsRef.current) {
+      try {
+        const runState = buildGigaverseRunState(ds, enemies)
+        return mctsRef.current.pickAction(runState).type
+      } catch (err) {
+        console.error('[Dashboard] MCTS pickAction error:', err)
+      }
+    }
+    return null
+  }
+
+  async function handlePlayMove(move: GigaverseActionType) {
     const { bearerToken: currentToken } = useAuthStore.getState()
     if (!currentToken) {
       setLocalError('No bearer token. Please re-login.')
       return
     }
-    const result = await callGigaverseAction(fetchDungeonState, currentToken)
+    setLocalError('')
+
+    const dsBefore = useGigaverseStore.getState().dungeonState
+    const userHPBefore = dsBefore?.run?.players[0].health.current ?? 0
+    const enemyHPBefore = dsBefore?.run?.players[1].health.current ?? 0
+    const dungeonId = dsBefore?.entity?.ID_CID ? parseInt(dsBefore.entity.ID_CID) : 1
+    const { actionToken } = useGigaverseStore.getState()
+
+    try {
+      const result = await callGigaverseAction(playMove, currentToken, actionToken, dungeonId, move)
+      if (!result.success) {
+        throw new Error(result.message || 'Failed to play move.')
+      }
+
+      if (result.gameItemBalanceChanges?.length) {
+        setBalanceChangesHistory((prev) => [...prev, ...result.gameItemBalanceChanges!])
+      }
+
+      const dsAfter = useGigaverseStore.getState().dungeonState
+      const userHPAfter = dsAfter?.run?.players[0].health.current ?? 0
+      const enemyHPAfter = dsAfter?.run?.players[1].health.current ?? 0
+      const userMove = dsAfter?.run?.players[0].lastMove || move
+      const enemyMove = dsAfter?.run?.players[1].lastMove || 'unknown'
+
+      setBattleHistory((prev) => [
+        ...prev,
+        {
+          userMove,
+          enemyMove,
+          userHPBefore,
+          userHPAfter,
+          enemyHPBefore,
+          enemyHPAfter,
+          timestamp: Date.now(),
+        },
+      ])
+    } catch (err) {
+      console.error('[Dashboard] handlePlayMove error:', err)
+      setLocalError(err instanceof Error ? err.message : 'Move error.')
+    }
+  }
+
+  // =============================
+  // Additional UI actions
+  // =============================
+  async function handleFetchDungeon() {
+    if (!bearerToken) return
+    setLocalError('')
+    const result = await callGigaverseAction(fetchDungeonState, bearerToken)
     if (!result.success) {
       setLocalError(result.message || 'Failed to fetch dungeon.')
     }
   }
 
-  async function handleStartRun(dungeonId: number) {
+  /**
+   * Clear logs/recap only when starting a new run.
+   */
+  async function handleStartRun(dungeonId: number, isJuiced = false) {
+    if (!bearerToken) return
     setLocalError('')
-    const { bearerToken: currentToken } = useAuthStore.getState()
-    if (!currentToken) {
-      setLocalError('No bearer token. Please re-login.')
-      return
-    }
-    const result = await callGigaverseAction(startRunAction, currentToken, dungeonId)
+
+    const { actionToken } = useGigaverseStore.getState()
+    const result = await callGigaverseAction(
+      startRunAction,
+      bearerToken,
+      actionToken,
+      dungeonId,
+      isJuiced
+    )
+
     if (!result.success) {
       setLocalError(result.message || 'Failed to start run.')
+      return
+    }
+    // Clear only here:
+    setBattleHistory([])
+    setBalanceChangesHistory([])
+
+    await loadEnergy(bearerToken)
+  }
+
+  async function refreshDungeonAndEnergy() {
+    if (!bearerToken) return
+    setLocalError('')
+    try {
+      await Promise.all([
+        loadEnergy(bearerToken),
+        callGigaverseAction(fetchDungeonState, bearerToken),
+      ])
+    } catch (err) {
+      console.error('[Dashboard] refreshDungeonAndEnergy error:', err)
+      setLocalError('Failed to refresh dungeon or energy.')
     }
   }
 
-  if (isChecking) return <p>Checking your session...</p>
-  if (isLoading) return <p>Loading data from server...</p>
-  if (error) return <p style={{ color: 'red' }}>{error}</p>
-
-  // If we have a run, let's see recommended move
-  let recommendedMove: GigaverseActionType | null = null
-  if (dungeonState && selectedAlgorithm !== 'manual') {
-    recommendedMove = getRecommendedMove()
+  async function refreshDungeon() {
+    if (!bearerToken) return
+    await callGigaverseAction(fetchDungeonState, bearerToken)
   }
 
-  // A small helper to compute floor/room from ROOM_NUM_CID
-  function computeFloorRoom(entity: DungeonData['entity']) {
-    if (!entity) return { floor: 0, room: 0 }
-    const roomNum = entity.ROOM_NUM_CID
-    // floor => 1 + (roomNum-1)//4
-    // room => 1 + (roomNum-1)%4
-    const floor = 1 + Math.floor((roomNum - 1) / 4)
-    const room = 1 + ((roomNum - 1) % 4)
-    return { floor, room }
+  /**
+   * If run ends (HP=0 or COMPLETE_CID), we do NOT clear logs.
+   * We only stop auto-play and refresh the dungeon to see "No Active Run".
+   */
+  async function checkRunOverAndRefresh(): Promise<boolean> {
+    const ds = useGigaverseStore.getState().dungeonState
+    if (!ds || !ds.run) {
+      setAutoPlay(false)
+      await refreshDungeon()
+      return true
+    }
+    const userHP = ds.run.players[0].health.current
+    if (userHP <= 0) {
+      setAutoPlay(false)
+      await refreshDungeon()
+      // Not clearing logs here => user still sees them
+      return true
+    }
+    if (ds.entity?.COMPLETE_CID) {
+      setAutoPlay(false)
+      await refreshDungeon()
+      // Also not clearing logs
+      return true
+    }
+    return false
   }
 
-  const isAutoPlaying = autoPlay
+  async function runAutoPlayChain() {
+    if (isAutoPlayingRef.current) return
+    isAutoPlayingRef.current = true
 
+    try {
+      let steps = 60
+      while (useAlgorithmStore.getState().autoPlay && steps > 0) {
+        const ended = await checkRunOverAndRefresh()
+        if (ended) break
+
+        const move = getRecommendedMove()
+        if (!move) break
+
+        await handlePlayMove(move)
+        await new Promise((r) => setTimeout(r, 50))
+        steps--
+      }
+      await checkRunOverAndRefresh()
+    } catch (err) {
+      console.error('[AutoPlayChain] error:', err)
+    } finally {
+      isAutoPlayingRef.current = false
+    }
+  }
+
+  // =============================
+  // Computed rendering
+  // =============================
+  let displayedEnergy = 'N/A'
+  if (energyData) {
+    displayedEnergy = Math.floor(energyData.energy / 1_000_000_000).toString()
+  }
+
+  // =============================
+  // Render
+  // =============================
   return (
-      <main style={{ padding: 20 }}>
-        <h1>Dashboard - Extended UI</h1>
-        {localError && <p style={{ color: 'red' }}>{localError}</p>}
+    <main style={{ padding: 20 }}>
+      {isChecking ? (
+        <p>Checking your session...</p>
+      ) : isLoading ? (
+        <p>Loading data from server...</p>
+      ) : error ? (
+        <p style={{ color: 'red' }}>{error}</p>
+      ) : (
+        <>
+          {localError && <p style={{ color: 'red' }}>{localError}</p>}
 
-        <AlgorithmSelector />
+          <h1>Dashboard - Extended UI</h1>
+          <AlgorithmSelector />
 
-        {/* A Play/Pause button for auto-play */}
-        <div style={{ margin: '10px 0' }}>
-          <button onClick={() => setAutoPlay(!isAutoPlaying)}>
-            {isAutoPlaying ? 'Pause Auto-Play' : 'Play Auto-Play'}
+          <p>
+            Current Energy: {displayedEnergy} / {energyData ? energyData.maxEnergy : 'N/A'}
+          </p>
+
+          <div style={{ margin: '10px 0' }}>
+            <button onClick={() => setAutoPlay(!autoPlay)}>
+              {autoPlay ? 'Pause Auto-Play' : 'Play Auto-Play'}
+            </button>
+          </div>
+
+          <button onClick={handleFetchDungeon}>Fetch Dungeon State</button>
+          <button onClick={refreshDungeonAndEnergy} style={{ marginLeft: 8 }}>
+            Refresh Dungeon &amp; Energy
           </button>
-        </div>
 
-        <button onClick={handleFetchDungeon}>Fetch Dungeon State</button>
-
-        {dungeonState ? (
+          {/* ~~~~ Render the current run if present ~~~~ */}
+          {dungeonState ? (
             <section style={{ marginTop: 20 }}>
-              {/* 1) Floor/Room Display */}
               <DungeonRoomInfo entity={dungeonState.entity} />
 
-              {/* 2) Player/Enemy Stats */}
               <div style={{ display: 'flex', gap: '2rem', marginTop: '1rem' }}>
-                <PlayerStatsPanel
-                    title="Player"
-                    player={dungeonState.run?.players?.[0]}
-                />
-                <PlayerStatsPanel
-                    title="Enemy"
-                    player={dungeonState.run?.players?.[1]}
-                />
+                <PlayerStatsPanel title="Player" player={dungeonState.run?.players?.[0]} />
+                <PlayerStatsPanel title="Enemy" player={dungeonState.run?.players?.[1]} />
               </div>
 
-              {/* 3) Moves + recommended */}
               <div style={{ marginTop: 20 }}>
                 <h3>Manual Moves</h3>
                 <button onClick={() => handlePlayMove('rock')}>Rock</button>
@@ -400,48 +382,67 @@ export default function DashboardPage() {
                 <button onClick={() => handlePlayMove('loot_one')}>Loot One</button>
                 <button onClick={() => handlePlayMove('loot_two')}>Loot Two</button>
                 <button onClick={() => handlePlayMove('loot_three')}>Loot Three</button>
+                <button onClick={() => handlePlayMove('loot_four')}>Loot Four</button>
               </div>
 
-              {recommendedMove && (
-                  <p style={{ marginTop: 10 }}>
-                    Recommended Move: <strong>{recommendedMove}</strong>
-                  </p>
+              {selectedAlgorithm !== 'manual' && (
+                <p style={{ marginTop: 10 }}>
+                  Recommended Move: <strong>{getRecommendedMove() ?? 'None'}</strong>
+                </p>
               )}
 
-              {/* 4) If auto-play is off, user can do it once */}
-              {!isAutoPlaying && (
-                  <button style={{ marginTop: 10 }} onClick={runAutoPlayChain}>
-                    Play Auto-Play Once
-                  </button>
+              {!autoPlay && (
+                <button style={{ marginTop: 10 }} onClick={runAutoPlayChain}>
+                  Play Auto-Play Once
+                </button>
               )}
 
-              {/* 5) Aggregated item changes */}
-              <AggregatedChangesPanel changes={balanceChangesHistory} />
-
-              {/* 6) Step-by-step logs */}
-              <BattleLogsPanel logs={battleHistory} />
+              {dungeonState.run?.lootPhase && dungeonState.run?.lootOptions?.length > 0 && (
+                <LootOptionsPanel
+                  lootOptions={dungeonState.run.lootOptions}
+                  onPickLoot={handlePlayMove}
+                />
+              )}
             </section>
-        ) : (
-            // No run => let user start one
+          ) : (
             <section style={{ marginTop: 20 }}>
               <h2>No Active Run</h2>
-              <p>No dungeon is in progress. Start one below:</p>
+              <p>No dungeon in progress. Start one below:</p>
               <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
                 <button onClick={() => handleStartRun(1)}>Start Normal (ID=1)</button>
                 <button onClick={() => handleStartRun(2)}>Start Giga (ID=2)</button>
+                <button onClick={() => handleStartRun(3)}>Start Underhaul (ID=3)</button>
+                <button
+                  onClick={() => handleStartRun(1, true)}
+                  disabled={!energyData?.isPlayerJuiced}
+                >
+                  Start Juiced Normal (ID=1)
+                </button>
+                <button
+                  onClick={() => handleStartRun(2, true)}
+                  disabled={!energyData?.isPlayerJuiced}
+                >
+                  Start Juiced Giga (ID=2)
+                </button>
+                <button
+                  onClick={() => handleStartRun(3, true)}
+                  disabled={!energyData?.isPlayerJuiced}
+                >
+                  Start Juiced Underhaul (ID=3)
+                </button>
               </div>
             </section>
-        )}
-      </main>
+          )}
+          <AggregatedChangesPanel changes={balanceChangesHistory} />
+          <BattleLogsPanel logs={battleHistory} />
+        </>
+      )}
+    </main>
   )
 }
 
-/* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   Additional Components for Stats & Logs
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-
 /**
- * Shows the floor/room from ROOM_NUM_CID (4 rooms per floor).
+ * Displays the current dungeon room/floor.
  */
 function DungeonRoomInfo({ entity }: { entity: DungeonData['entity'] }) {
   if (!entity) return null
@@ -450,25 +451,25 @@ function DungeonRoomInfo({ entity }: { entity: DungeonData['entity'] }) {
   const room = 1 + ((roomNum - 1) % 4)
 
   return (
-      <div>
-        <h3>Dungeon Progress</h3>
-        <p>
-          Floor: {floor}, Room: {room}
-        </p>
-      </div>
+    <div>
+      <h3>Dungeon Progress</h3>
+      <p>
+        Floor: {floor}, Room: {room}
+      </p>
+    </div>
   )
 }
 
 /**
- * Displays a player's stats: HP, Armor, R/P/S charges, lastMove, etc.
+ * Show each player's HP/Shields, rock/paper/scissor details, last move, etc.
  */
 function PlayerStatsPanel({ title, player }: { title: string; player?: any }) {
   if (!player) {
     return (
-        <div>
-          <h3>{title} Stats</h3>
-          <p>No data.</p>
-        </div>
+      <div>
+        <h3>{title} Stats</h3>
+        <p>No data.</p>
+      </div>
     )
   }
 
@@ -478,65 +479,94 @@ function PlayerStatsPanel({ title, player }: { title: string; player?: any }) {
   const maxShield = player.shield?.currentMax ?? 0
 
   return (
-      <div style={{ border: '1px solid #ccc', padding: '0.5rem', flex: 1 }}>
-        <h3>{title} Stats</h3>
-        <p>HP: {hp} / {maxHP}</p>
-        <p>Armor: {shield} / {maxShield}</p>
-        <p>Rock charges: {player.rock?.currentCharges ?? 0}</p>
-        <p>Paper charges: {player.paper?.currentCharges ?? 0}</p>
-        <p>Scissor charges: {player.scissor?.currentCharges ?? 0}</p>
-        <p>Last Move: {player.lastMove || 'None'}</p>
-      </div>
+    <div style={{ border: '1px solid #ccc', padding: '0.5rem', flex: 1 }}>
+      <h3>{title} Stats</h3>
+      <p>
+        HP: {hp} / {maxHP}
+      </p>
+      <p>
+        Armor: {shield} / {maxShield}
+      </p>
+
+      <p>
+        Rock — Charges: {player.rock?.currentCharges ?? 0}, ATK: {player.rock?.currentATK ?? 0},
+        DEF: {player.rock?.currentDEF ?? 0}
+      </p>
+      <p>
+        Paper — Charges: {player.paper?.currentCharges ?? 0}, ATK: {player.paper?.currentATK ?? 0},
+        DEF: {player.paper?.currentDEF ?? 0}
+      </p>
+      <p>
+        Scissor — Charges: {player.scissor?.currentCharges ?? 0}, ATK:{' '}
+        {player.scissor?.currentATK ?? 0}, DEF: {player.scissor?.currentDEF ?? 0}
+      </p>
+
+      <p>Last Move: {player.lastMove || 'None'}</p>
+    </div>
   )
 }
 
 /**
- * Shows aggregated item changes from all moves in the run.
- */
-function AggregatedChangesPanel({ changes }: { changes: GameItemBalanceChange[] }) {
-  if (!changes.length) return null
-
-  // We can do a quick sum by itemId for demonstration
-  // i.e. itemId => total
-  const aggregated = changes.reduce((acc, c) => {
-    const key = c.id
-    acc[key] = (acc[key] || 0) + c.amount
-    return acc
-  }, {} as Record<number, number>)
-
-  return (
-      <div style={{ marginTop: 20 }}>
-        <h3>Aggregated Item Changes</h3>
-        {Object.entries(aggregated).map(([itemId, total]) => (
-            <p key={itemId}>
-              Item {itemId} => total change: {total}
-            </p>
-        ))}
-      </div>
-  )
-}
-
-/**
- * Shows a step-by-step log of each move: user's move, enemy's move, HP changes, etc.
+ * By placing this panel outside the `dungeonState ? ... : ...` block,
+ * we keep logs visible even after a run ends and the server returns null for dungeonState.
  */
 function BattleLogsPanel({ logs }: { logs: StepLog[] }) {
   if (!logs.length) return null
 
   return (
-      <div style={{ marginTop: 20 }}>
-        <h3>Battle History</h3>
-        {logs.map((log, idx) => (
-            <div key={log.timestamp} style={{ borderBottom: '1px solid #aaa', padding: '4px 0' }}>
-              <p>
-                <strong>Step {idx + 1}</strong> - {new Date(log.timestamp).toLocaleTimeString()}
-              </p>
-              <p>User Move: {log.userMove} | Enemy Move: {log.enemyMove}</p>
-              <p>
-                HP: {log.userHPBefore} => {log.userHPAfter} (You),{' '}
-                {log.enemyHPBefore} => {log.enemyHPAfter} (Enemy)
-              </p>
-            </div>
+    <div style={{ marginTop: 20 }}>
+      <h3>Battle History</h3>
+      {logs.map((log, idx) => (
+        <div key={log.timestamp} style={{ borderBottom: '1px solid #aaa', padding: '4px 0' }}>
+          <p>
+            <strong>Step {idx + 1}</strong> - {new Date(log.timestamp).toLocaleTimeString()}
+          </p>
+          <p>
+            User Move: {log.userMove} | Enemy Move: {log.enemyMove}
+          </p>
+          <p>
+            HP: {log.userHPBefore} =&gt; {log.userHPAfter} (You), {log.enemyHPBefore} =&gt;{' '}
+            {log.enemyHPAfter} (Enemy)
+          </p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function LootOptionsPanel({
+  lootOptions,
+  onPickLoot,
+}: {
+  lootOptions: LootOption[]
+  onPickLoot: (move: GigaverseActionType) => void
+}) {
+  if (!lootOptions.length) return null
+
+  return (
+    <div style={{ marginTop: 20 }}>
+      <h3>Available Loot</h3>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+        {lootOptions.map((loot, index) => (
+          <div
+            key={loot.docId || index}
+            style={{
+              border: '1px solid #ccc',
+              padding: '10px',
+              width: '220px',
+              borderRadius: 6,
+            }}
+          >
+            <p>Rarity: {loot.RARITY_CID}</p>
+            <p>Boon Type: {loot.boonTypeString}</p>
+            <p>Selected Val1: {loot.selectedVal1}</p>
+            <p>Selected Val2: {loot.selectedVal2}</p>
+            <button onClick={() => onPickLoot(`loot_${index + 1}` as GigaverseActionType)}>
+              Pick Loot {index + 1}
+            </button>
+          </div>
         ))}
       </div>
+    </div>
   )
 }

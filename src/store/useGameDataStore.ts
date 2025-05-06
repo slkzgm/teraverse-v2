@@ -1,61 +1,82 @@
-// path: src/store/useGameDataStore.ts
+// path: src/store/useGameDataStore.tsx
 'use client'
 
 import { create } from 'zustand'
-import { EnemyEntity, GameItemEntity } from '@slkzgm/gigaverse-sdk/dist/client/types/game'
-import { getAllEnemiesAction, getAllGameItemsAction } from '@/actions/gigaverseActions'
+import { getOffchainStaticAction } from '@/actions/gigaverseActions'
+import type {
+  EnemyEntity,
+  OffchainGameItemEntity,
+  OffchainConstants,
+  RecipeEntity,
+  CheckpointEntity,
+} from '@slkzgm/gigaverse-sdk'
+
+/**
+ * Helper function to build a lookup map where each key is an item ID_CID
+ * and the value is the corresponding item entity.
+ * This allows quick O(1) access by ID_CID.
+ */
+function buildItemMap(items: OffchainGameItemEntity[]): Record<number, OffchainGameItemEntity> {
+  const map: Record<number, OffchainGameItemEntity> = {}
+  for (const item of items) {
+    // Ensure item has an ID_CID before storing
+    map[item.ID_CID] = item
+  }
+  return map
+}
 
 interface GameDataState {
   enemies: EnemyEntity[]
-  items: GameItemEntity[]
+  gameItems: OffchainGameItemEntity[]
+  recipes: RecipeEntity[]
+  checkpoints: CheckpointEntity[]
+  constants: OffchainConstants | null
+
+  /**
+   * itemsMap provides a direct ID_CID => OffchainGameItemEntity mapping for quick lookup.
+   */
+  itemsMap: Record<number, OffchainGameItemEntity>
+
   isLoading: boolean
   error: string | null
 
-  loadEnemies: (token: string) => Promise<void>
-  loadItems: (token: string) => Promise<void>
+  /**
+   * Loads offchain static data (enemies, game items, recipes, checkpoints, constants) via a single endpoint.
+   */
+  loadOffchainStatic: (token: string) => Promise<void>
 }
 
-/**
- * A Zustand store for dynamic game data (enemies, items, etc.).
- * We'll fetch them via server actions from gigaverseActions.ts,
- * then store in-memory here for our Next.js components to use.
- */
 export const useGameDataStore = create<GameDataState>((set) => ({
   enemies: [],
-  items: [],
+  gameItems: [],
+  recipes: [],
+  checkpoints: [],
+  constants: null,
+  itemsMap: {},
+
   isLoading: false,
   error: null,
 
-  // Example method to load enemies
-  loadEnemies: async (token) => {
-    console.log('[useGameDataStore] Loading enemies via server action...')
+  async loadOffchainStatic(token) {
+    console.log('[useGameDataStore] Loading offchain static data via server action...')
     set({ isLoading: true, error: null })
     try {
-      const resp = await getAllEnemiesAction(token)
-      // Suppose getAllEnemiesAction returns { entities: EnemyEntity[] }
-      set({ enemies: resp.entities, isLoading: false })
-    } catch (err) {
-      console.error('[useGameDataStore] loadEnemies error:', err)
-      set({
-        isLoading: false,
-        error: err instanceof Error ? err.message : 'Failed to load enemies',
-      })
-    }
-  },
+      const resp = await getOffchainStaticAction(token)
 
-  // Example method to load items
-  loadItems: async (token) => {
-    console.log('[useGameDataStore] Loading items via server action...')
-    set({ isLoading: true, error: null })
-    try {
-      const resp = await getAllGameItemsAction(token)
-      // Suppose getAllGameItemsAction returns { entities: GameItemEntity[] }
-      set({ items: resp.entities, isLoading: false })
+      set({
+        enemies: resp.enemies,
+        gameItems: resp.gameItems,
+        recipes: resp.recipes,
+        checkpoints: resp.checkpoints,
+        constants: resp.constants,
+        itemsMap: buildItemMap(resp.gameItems),
+        isLoading: false,
+      })
     } catch (err) {
-      console.error('[useGameDataStore] loadItems error:', err)
+      console.error('[useGameDataStore] loadOffchainStatic error:', err)
       set({
         isLoading: false,
-        error: err instanceof Error ? err.message : 'Failed to load items',
+        error: err instanceof Error ? err.message : 'Failed to load offchain data.',
       })
     }
   },

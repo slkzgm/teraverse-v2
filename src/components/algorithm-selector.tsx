@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
  * and toggling auto-play.
  */
 export default function AlgorithmSelector() {
-  const { selectedAlgorithm, autoPlay, setAlgorithm, setAutoPlay } = useAlgorithmStore()
+  const { selectedAlgorithm, setAlgorithm } = useAlgorithmStore()
 
   const algorithms = ['manual', 'mcts', 'random'] as const
 
@@ -27,17 +27,6 @@ export default function AlgorithmSelector() {
             {algo.toUpperCase()}
           </Button>
         ))}
-      </div>
-
-      <div style={{ marginTop: 10 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <input
-            type="checkbox"
-            checked={autoPlay}
-            onChange={(e) => setAutoPlay(e.target.checked)}
-          />
-          <span>Auto-Play</span>
-        </label>
       </div>
     </div>
   )

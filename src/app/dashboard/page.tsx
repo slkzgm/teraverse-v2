@@ -22,8 +22,8 @@ import {
 } from '@slkzgm/gigaverse-engine'
 import { silentLogger } from '@/utils/silentLogger'
 import type { GameItemBalanceChange, DungeonData, LootOption } from '@slkzgm/gigaverse-sdk'
-import { AggregatedChangesPanel } from '@/components/dashboard/aggregated-changes-panel'
 import { DailyDungeonsPanel } from '@/components/dashboard/daily-dungeons-panel'
+import { RunRecapPanel } from '@/components/dashboard/run-recap-panel'
 
 interface StepLog {
   userMove: string
@@ -63,7 +63,6 @@ export default function DashboardPage() {
     isLoading,
     error,
   } = useGameDataStore()
-
   const { selectedAlgorithm, autoPlay, setAutoPlay } = useAlgorithmStore()
 
   // Local states
@@ -72,11 +71,18 @@ export default function DashboardPage() {
   const [balanceChangesHistory, setBalanceChangesHistory] = useState<GameItemBalanceChange[]>([])
   const [battleHistory, setBattleHistory] = useState<StepLog[]>([])
 
+  /**
+   * finalEnemiesDefeated: recorded once the run ends (due to death or completion).
+   * Shown in the new RunRecapPanel if there's no active run.
+   */
+  const [finalEnemiesDefeated, setFinalEnemiesDefeated] = useState(0)
+
+  // MCTS ref & auto-play state
   const mctsRef = useRef<MctsAlgorithm | null>(null)
   const isAutoPlayingRef = useRef(false)
 
   // ------------------------------------------------
-  // Setup algorithm
+  // Setup selected algorithm
   // ------------------------------------------------
   useEffect(() => {
     if (selectedAlgorithm === 'mcts') {
@@ -111,11 +117,12 @@ export default function DashboardPage() {
   }, [bearerToken, expiresAt, router])
 
   // ------------------------------------------------
-  // Once validated, load data (offchain static, daily data, energy, etc.)
+  // Once validated, load core data (offchain, day progress, energy)
   // ------------------------------------------------
   useEffect(() => {
     if (!bearerToken || isChecking) return
 
+    // Offchain data
     if (enemies.length === 0 && gameItems.length === 0) {
       loadOffchainStatic(bearerToken)
     }
@@ -140,7 +147,7 @@ export default function DashboardPage() {
   ])
 
   // ------------------------------------------------
-  // Auto-fetch dungeon on mount => show current run
+  // Auto-fetch dungeon on mount
   // ------------------------------------------------
   useEffect(() => {
     if (!bearerToken || isChecking) return
@@ -152,12 +159,11 @@ export default function DashboardPage() {
         setLocalError(result.message || 'Failed to fetch dungeon on mount.')
       }
     }
-
     fetchOnMount()
   }, [bearerToken, isChecking])
 
   // ------------------------------------------------
-  // Auto-play
+  // Auto-play chain
   // ------------------------------------------------
   useEffect(() => {
     if (autoPlay) {
@@ -168,10 +174,10 @@ export default function DashboardPage() {
   }, [autoPlay])
 
   // =============================
-  // Moves & Helpers
+  // Moves / Helpers
   // =============================
   function getRecommendedMove(): GigaverseActionType | null {
-    const ds = useGigaverseStore.getState().dungeonState
+    const ds = dungeonState
     if (!ds) return null
 
     if (selectedAlgorithm === 'manual') return null
@@ -206,12 +212,11 @@ export default function DashboardPage() {
     }
     setLocalError('')
 
-    const dsBefore = dungeonState
-    if (!dsBefore?.run) return
+    if (!dungeonState?.run) return
 
-    const userHPBefore = dsBefore.run.players[0].health.current ?? 0
-    const enemyHPBefore = dsBefore.run.players[1].health.current ?? 0
-    const dungeonId = dsBefore.entity?.ID_CID ? parseInt(dsBefore.entity.ID_CID) : 1
+    const userHPBefore = dungeonState.run.players[0].health.current
+    const enemyHPBefore = dungeonState.run.players[1].health.current
+    const dungeonId = dungeonState.entity?.ID_CID ? parseInt(dungeonState.entity.ID_CID) : 1
     const { actionToken } = useGigaverseStore.getState()
 
     try {
@@ -224,12 +229,11 @@ export default function DashboardPage() {
         setBalanceChangesHistory((prev) => [...prev, ...result.gameItemBalanceChanges!])
       }
 
-      // Grab the updated dungeonState from the store
       const dsAfter = useGigaverseStore.getState().dungeonState
       if (!dsAfter?.run) return
 
-      const userHPAfter = dsAfter.run.players[0].health.current ?? 0
-      const enemyHPAfter = dsAfter.run.players[1].health.current ?? 0
+      const userHPAfter = dsAfter.run.players[0].health.current
+      const enemyHPAfter = dsAfter.run.players[1].health.current
       const userMove = dsAfter.run.players[0].lastMove || move
       const enemyMove = dsAfter.run.players[1].lastMove || 'unknown'
 
@@ -254,6 +258,7 @@ export default function DashboardPage() {
   async function handleFetchDungeon() {
     if (!bearerToken) return
     setLocalError('')
+
     const result = await callGigaverseAction(fetchDungeonState, bearerToken)
     if (!result.success) {
       setLocalError(result.message || 'Failed to fetch dungeon.')
@@ -280,6 +285,7 @@ export default function DashboardPage() {
     // Clear local logs
     setBattleHistory([])
     setBalanceChangesHistory([])
+    setFinalEnemiesDefeated(0)
 
     // For daily usage: normal => +1, juiced => +3
     incrementRunCount(dungeonId, isJuiced ? 3 : 1)
@@ -309,6 +315,9 @@ export default function DashboardPage() {
     await callGigaverseAction(fetchDungeonState, bearerToken)
   }
 
+  /**
+   * Checks if run ended => setAutoPlay(false), store final enemies defeated, refresh dungeon.
+   */
   async function checkRunOverAndRefresh(): Promise<boolean> {
     const ds = useGigaverseStore.getState().dungeonState
     if (!ds || !ds.run) {
@@ -316,17 +325,24 @@ export default function DashboardPage() {
       await refreshDungeon()
       return true
     }
+
     const userHP = ds.run.players[0].health.current
     if (userHP <= 0) {
+      // user died => set final enemies defeated
+      setFinalEnemiesDefeated(ds.entity?.ROOM_NUM_CID ? ds.entity.ROOM_NUM_CID - 1 : 0)
       setAutoPlay(false)
       await refreshDungeon()
       return true
     }
+
     if (ds.entity?.COMPLETE_CID) {
+      // run complete => also set final enemies
+      setFinalEnemiesDefeated(ds.entity.ROOM_NUM_CID ? ds.entity.ROOM_NUM_CID - 1 : 0)
       setAutoPlay(false)
       await refreshDungeon()
       return true
     }
+
     return false
   }
 
@@ -356,7 +372,7 @@ export default function DashboardPage() {
   }
 
   // =============================
-  // Render
+  // Derived values
   // =============================
   let displayedEnergy = 'N/A'
   let currentEnergyInt = 0
@@ -367,6 +383,9 @@ export default function DashboardPage() {
     isPlayerJuiced = Boolean(energyData.isPlayerJuiced)
   }
 
+  // =============================
+  // Render
+  // =============================
   return (
     <main style={{ padding: 20 }}>
       {isChecking ? (
@@ -399,9 +418,9 @@ export default function DashboardPage() {
           </button>
 
           {dungeonState ? (
-            // ------------------------------------
-            // Active run: show run details
-            // ------------------------------------
+            // --------------------------------
+            // Active run
+            // --------------------------------
             <section style={{ marginTop: 20 }}>
               <DungeonRoomInfo entity={dungeonState.entity} />
 
@@ -441,9 +460,9 @@ export default function DashboardPage() {
               )}
             </section>
           ) : (
-            // ------------------------------------
-            // No active run: show minimal start-run buttons
-            // ------------------------------------
+            // --------------------------------
+            // No active run
+            // --------------------------------
             <section style={{ marginTop: 20 }}>
               <h2>No Active Run</h2>
               <p>Pick a dungeon to start a run.</p>
@@ -472,7 +491,6 @@ export default function DashboardPage() {
                         {isPlayerJuiced ? juicedMax : normalMax}
                       </strong>
                     </div>
-                    {/* Normal Button */}
                     <button
                       disabled={!canRunNormal}
                       style={{ marginRight: 6, color: canRunNormal ? 'inherit' : 'red' }}
@@ -480,8 +498,6 @@ export default function DashboardPage() {
                     >
                       Start Normal ({normalCost} energy)
                     </button>
-
-                    {/* Juiced Button */}
                     {isPlayerJuiced && (
                       <button
                         disabled={!canRunJuiced}
@@ -497,7 +513,12 @@ export default function DashboardPage() {
             </section>
           )}
 
-          <AggregatedChangesPanel changes={balanceChangesHistory} />
+          <RunRecapPanel
+            changes={balanceChangesHistory}
+            dungeonState={dungeonState}
+            finalEnemiesDefeated={finalEnemiesDefeated}
+          />
+
           <BattleLogsPanel logs={battleHistory} />
         </>
       )}
@@ -533,6 +554,7 @@ function PlayerStatsPanel({ title, player }: { title: string; player?: any }) {
       </div>
     )
   }
+
   const hp = player.health?.current ?? 0
   const maxHP = player.health?.currentMax ?? 0
   const shield = player.shield?.current ?? 0
@@ -547,6 +569,7 @@ function PlayerStatsPanel({ title, player }: { title: string; player?: any }) {
       <p>
         Armor: {shield} / {maxShield}
       </p>
+
       <p>
         Rock — Charges: {player.rock?.currentCharges ?? 0}, ATK: {player.rock?.currentATK ?? 0},
         DEF: {player.rock?.currentDEF ?? 0}
@@ -559,6 +582,7 @@ function PlayerStatsPanel({ title, player }: { title: string; player?: any }) {
         Scissor — Charges: {player.scissor?.currentCharges ?? 0}, ATK:{' '}
         {player.scissor?.currentATK ?? 0}, DEF: {player.scissor?.currentDEF ?? 0}
       </p>
+
       <p>Last Move: {player.lastMove || 'None'}</p>
     </div>
   )
@@ -566,6 +590,7 @@ function PlayerStatsPanel({ title, player }: { title: string; player?: any }) {
 
 function BattleLogsPanel({ logs }: { logs: StepLog[] }) {
   if (!logs.length) return null
+
   return (
     <div style={{ marginTop: 20 }}>
       <h3>Battle History</h3>
@@ -601,7 +626,7 @@ function LootOptionsPanel({
       <h3>Available Loot</h3>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
         {lootOptions.map((loot, index) => (
-          <div key={loot.docId || index} style={{ padding: '10px', border: '1px solid #ccc' }}>
+          <div key={loot.docId || index} style={{ border: '1px solid #ccc', padding: '10px' }}>
             <p>Rarity: {loot.RARITY_CID}</p>
             <p>Boon Type: {loot.boonTypeString}</p>
             <p>Val1: {loot.selectedVal1}</p>

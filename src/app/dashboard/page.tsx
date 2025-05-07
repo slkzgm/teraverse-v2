@@ -16,7 +16,7 @@ import {
 } from '@slkzgm/gigaverse-engine'
 import { silentLogger } from '@/utils/silentLogger'
 import type { DungeonData, GameItemBalanceChange, LootOption, Player } from '@slkzgm/gigaverse-sdk'
-import { DailyDungeonsPanel } from '@/app/dashboard/components/daily-dungeons-panel'
+// import { DailyDungeonsPanel } from '@/app/dashboard/components/daily-dungeons-panel'
 import { RunRecapPanel } from '@/app/dashboard/components/run-recap-panel'
 import { useRunHistoryStore } from '@/store/useRunHistoryStore'
 import { RunHistoryPanel } from '@/app/dashboard/components/run-history-panel'
@@ -380,7 +380,7 @@ export default function DashboardPage() {
             Current Energy: {displayedEnergy} / {energyData ? energyData.maxEnergy : 'N/A'}
           </p>
 
-          <DailyDungeonsPanel />
+          {/*<DailyDungeonsPanel />*/}
 
           <div style={{ margin: '10px 0' }}>
             <button onClick={() => setAutoPlay(!autoPlay)}>
@@ -451,54 +451,59 @@ export default function DashboardPage() {
             // --------------------------------
             // No active run
             // --------------------------------
-            <section style={{ marginTop: 20 }}>
-              <h2>No Active Run</h2>
-              <p>Pick a dungeon to start a run.</p>
+              <section style={{ marginTop: 20 }}>
+                <h2>No Active Run</h2>
+                <p>Pick a dungeon to start a run.</p>
 
-              {Object.entries(todayDungeonsMap).map(([key, data]) => {
-                const dungeonId = parseInt(key, 10)
-                const runsUsed = dayProgressMap[dungeonId] || 0
+                {Object.entries(todayDungeonsMap).map(([key, data]) => {
+                  const dungeonId = parseInt(key, 10)
+                  const runsUsed = dayProgressMap[dungeonId] || 0
 
-                // For normal run
-                const normalMax = data.UINT256_CID
-                const normalCost = data.ENERGY_CID
-                const canRunNormal = runsUsed < normalMax && currentEnergyInt >= normalCost
+                  const normalCost = data.ENERGY_CID
+                  const juicedCost = normalCost * 3
 
-                // For juiced run
-                const juicedMax = data.juicedMaxRunsPerDay
-                const juicedCost = data.ENERGY_CID * 3
-                const runsUsedJuiced = runsUsed < juicedMax
-                const canRunJuiced =
-                  isPlayerJuiced && runsUsedJuiced && currentEnergyInt >= juicedCost
+                  const normalMax = data.UINT256_CID
+                  const juicedMax = data.juicedMaxRunsPerDay
 
-                return (
-                  <div key={dungeonId} style={{ margin: '8px 0' }}>
-                    <div>
-                      <strong>
-                        {data.NAME_CID} (ID={dungeonId}) | Runs: {runsUsed} /{' '}
-                        {isPlayerJuiced ? juicedMax : normalMax}
-                      </strong>
-                    </div>
-                    <button
-                      disabled={!canRunNormal}
-                      style={{ marginRight: 6, color: canRunNormal ? 'inherit' : 'red' }}
-                      onClick={() => handleStartRun(dungeonId, false)}
-                    >
-                      Start Normal ({normalCost} energy)
-                    </button>
-                    {isPlayerJuiced && (
-                      <button
-                        disabled={!canRunJuiced}
-                        style={{ color: canRunJuiced ? 'inherit' : 'red' }}
-                        onClick={() => handleStartRun(dungeonId, true)}
-                      >
-                        Start Juiced ({juicedCost} energy)
-                      </button>
-                    )}
-                  </div>
-                )
-              })}
-            </section>
+                  // if juiced, you get up to juicedMax runs; otherwise up to normalMax
+                  const effectiveMax = isPlayerJuiced ? juicedMax : normalMax
+
+                  // normal run consumes 1 run
+                  const canRunNormal = runsUsed < effectiveMax && currentEnergyInt >= normalCost
+
+                  // juiced run consumes 3 runs at once, must not exceed juicedMax
+                  const canRunJuiced =
+                      isPlayerJuiced &&
+                      runsUsed + 3 <= juicedMax &&
+                      currentEnergyInt >= juicedCost
+
+                  return (
+                      <div key={dungeonId} style={{ margin: '8px 0' }}>
+                        <div>
+                          <strong>
+                            {data.NAME_CID} (ID={dungeonId}) | Runs: {runsUsed} / {effectiveMax}
+                          </strong>
+                        </div>
+                        <button
+                            disabled={!canRunNormal}
+                            style={{ marginRight: 6, color: canRunNormal ? 'inherit' : 'red' }}
+                            onClick={() => handleStartRun(dungeonId, false)}
+                        >
+                          Start Normal ({normalCost} energy)
+                        </button>
+                        {isPlayerJuiced && (
+                            <button
+                                disabled={!canRunJuiced}
+                                style={{ color: canRunJuiced ? 'inherit' : 'red' }}
+                                onClick={() => handleStartRun(dungeonId, true)}
+                            >
+                              Start Juiced ({juicedCost} energy)
+                            </button>
+                        )}
+                      </div>
+                  )
+                })}
+              </section>
           )}
 
           {/* Combined run recap (enemies + items) */}

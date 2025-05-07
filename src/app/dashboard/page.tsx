@@ -48,6 +48,9 @@ export default function DashboardPage() {
 
   // Core Zustand stores
   const {
+    address,
+    username,
+    noobId,
     dungeonState,
     energyData,
     stopEnergyTimer,
@@ -363,7 +366,10 @@ export default function DashboardPage() {
       const itemChanges = getAggregatedItemChanges()
 
       // Add local run recap => local storage
-      useRunHistoryStore.getState().addRun({
+      addRun({
+        address,
+        username,
+        noobId,
         dungeonId: ds.entity?.ID_CID ? parseInt(ds.entity.ID_CID) : 0,
         dungeonName: currentDungeonName,
         isJuiced: currentDungeonIsJuiced,

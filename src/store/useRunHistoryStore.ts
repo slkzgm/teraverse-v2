@@ -8,14 +8,14 @@ import { persist } from 'zustand/middleware'
  * Describes a single run recap that we'll store locally.
  */
 export interface RunRecapEntry {
+  address: string
+  username: string
+  noobId: string
   dungeonId: number
   dungeonName: string
   isJuiced: boolean
   enemiesDefeated: number
   timestamp: number
-  /**
-   * Aggregated item changes: itemId => total net gain/loss
-   */
   itemChanges: Record<number, number>
 }
 

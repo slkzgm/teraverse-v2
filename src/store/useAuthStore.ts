@@ -7,8 +7,10 @@ import { persist } from 'zustand/middleware'
 interface AuthState {
   bearerToken: string | null
   expiresAt: number | null
+  hasHydrated: boolean
   setAuthData: (token: string, expiresAt: number) => void
   clearAuthData: () => void
+  setHasHydrated: (value: boolean) => void
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -16,6 +18,7 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       bearerToken: null,
       expiresAt: null,
+      hasHydrated: false,
 
       setAuthData: (token, expiresAt) => {
         set({ bearerToken: token, expiresAt })
@@ -23,9 +26,20 @@ export const useAuthStore = create<AuthState>()(
       clearAuthData: () => {
         set({ bearerToken: null, expiresAt: null })
       },
+      setHasHydrated: (value) => set({ hasHydrated: value }),
     }),
     {
       name: 'auth-storage',
+      onRehydrateStorage: () => (state, error) => {
+        if (error) {
+          console.error('[useAuthStore] Error rehydrating:', error)
+        } else {
+          if (state) {
+            state.setHasHydrated(true)
+          }
+          console.log('[useAuthStore] Rehydration complete')
+        }
+      },
     }
   )
 )

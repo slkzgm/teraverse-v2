@@ -21,15 +21,15 @@ import { RunRecapPanel } from '@/app/dashboard/components/run-recap-panel'
 import { useRunHistoryStore } from '@/store/useRunHistoryStore'
 import { RunHistoryPanel } from '@/app/dashboard/components/run-history-panel'
 
-interface StepLog {
-  userMove: string
-  enemyMove: string
-  userHPBefore: number
-  userHPAfter: number
-  enemyHPBefore: number
-  enemyHPAfter: number
-  timestamp: number
-}
+// interface StepLog {
+//   userMove: string
+//   enemyMove: string
+//   userHPBefore: number
+//   userHPAfter: number
+//   enemyHPBefore: number
+//   enemyHPAfter: number
+//   timestamp: number
+// }
 
 const mctsConfig = {
   simulationsCount: 300,
@@ -66,7 +66,7 @@ export default function DashboardPage() {
   // Local states
   const [localError, setLocalError] = useState('')
   const [balanceChangesHistory, setBalanceChangesHistory] = useState<GameItemBalanceChange[]>([])
-  const [battleHistory, setBattleHistory] = useState<StepLog[]>([])
+  // const [battleHistory, setBattleHistory] = useState<StepLog[]>([])
   const [finalEnemiesDefeated, setFinalEnemiesDefeated] = useState(0)
 
   // Tracking current run's dungeon name & mode (juiced/normal)
@@ -240,20 +240,45 @@ export default function DashboardPage() {
   const handlePlayMove = useCallback(
     async (move: GigaverseActionType) => {
       if (!bearerToken) return
-      const ds = useGigaverseStore.getState().dungeonState
-      if (!ds?.run) return
+      // capture pre-move state
+      const prevDs = useGigaverseStore.getState().dungeonState
+      if (!prevDs?.run) return
+      // const prevPlayer = prevDs.run.players[0]
+      // const prevEnemy = prevDs.run.players[1]
 
       try {
         const result = await callGigaverseAction(
           playMoveAction,
           bearerToken,
           useGigaverseStore.getState().actionToken,
-          Number(ds.entity?.ID_CID),
+          Number(prevDs.entity?.ID_CID),
           move
         )
+
+        // update item balances
         if (result.gameItemBalanceChanges?.length) {
           setBalanceChangesHistory((prev) => [...prev, ...result.gameItemBalanceChanges!])
         }
+
+        // // read the new state out of the store
+        // const newDs = useGigaverseStore.getState().dungeonState
+        // const newPlayer = newDs?.run?.players?.[0]
+        // const newEnemy = newDs?.run?.players?.[1]
+        //
+        // if (newPlayer && newEnemy) {
+        //   setBattleHistory(prev => [
+        //     ...prev,
+        //     {
+        //       userMove: move,
+        //       enemyMove: newEnemy.lastMove || '',
+        //       userHPBefore: prevPlayer.health.current,
+        //       userHPAfter: newPlayer.health.current,
+        //       enemyHPBefore: prevEnemy.health.current,
+        //       enemyHPAfter: newEnemy.health.current,
+        //       timestamp: Date.now(),
+        //     },
+        //   ])
+        // }
       } catch (err) {
         console.error('[Dashboard] handlePlayMove error:', err)
       }
@@ -301,7 +326,7 @@ export default function DashboardPage() {
     }
 
     // Clear existing logs
-    setBattleHistory([])
+    // setBattleHistory([])
     setBalanceChangesHistory([])
     setFinalEnemiesDefeated(0)
 
@@ -405,6 +430,13 @@ export default function DashboardPage() {
                 <PlayerStatsPanel title="Enemy" player={dungeonState.run?.players?.[1]} />
               </div>
 
+              {dungeonState.run?.lootPhase && dungeonState.run?.lootOptions?.length > 0 && (
+                <LootOptionsPanel
+                  lootOptions={dungeonState.run.lootOptions}
+                  onPickLoot={handlePlayMove}
+                />
+              )}
+
               <div style={{ marginTop: 20 }}>
                 <h3>Manual Moves</h3>
                 <button onClick={() => handlePlayMove(GigaverseActionType.MOVE_ROCK)}>Rock</button>
@@ -433,77 +465,62 @@ export default function DashboardPage() {
                   Recommended Move: <strong>{getRecommendedMove() ?? 'None'}</strong>
                 </p>
               )}
-
-              {!autoPlay && (
-                <button style={{ marginTop: 10 }} onClick={runAutoPlayChain}>
-                  Play Auto-Play Once
-                </button>
-              )}
-
-              {dungeonState.run?.lootPhase && dungeonState.run?.lootOptions?.length > 0 && (
-                <LootOptionsPanel
-                  lootOptions={dungeonState.run.lootOptions}
-                  onPickLoot={handlePlayMove}
-                />
-              )}
             </section>
           ) : (
             // --------------------------------
             // No active run
             // --------------------------------
-              <section style={{ marginTop: 20 }}>
-                <h2>No Active Run</h2>
-                <p>Pick a dungeon to start a run.</p>
+            <section style={{ marginTop: 20 }}>
+              <h2>No Active Run</h2>
+              <p>Pick a dungeon to start a run.</p>
 
-                {Object.entries(todayDungeonsMap).map(([key, data]) => {
-                  const dungeonId = parseInt(key, 10)
-                  const runsUsed = dayProgressMap[dungeonId] || 0
+              {Object.entries(todayDungeonsMap).map(([key, data]) => {
+                const dungeonId = parseInt(key, 10)
+                const runsUsed = dayProgressMap[dungeonId] || 0
 
-                  const normalCost = data.ENERGY_CID
-                  const juicedCost = normalCost * 3
+                const normalCost = data.ENERGY_CID
+                const juicedCost = normalCost * 3
 
-                  const normalMax = data.UINT256_CID
-                  const juicedMax = data.juicedMaxRunsPerDay
+                const normalMax = data.UINT256_CID
+                const juicedMax = data.juicedMaxRunsPerDay
 
-                  // if juiced, you get up to juicedMax runs; otherwise up to normalMax
-                  const effectiveMax = isPlayerJuiced ? juicedMax : normalMax
+                // if juiced, you get up to juicedMax runs; otherwise up to normalMax
+                const effectiveMax = isPlayerJuiced ? juicedMax : normalMax
 
-                  // normal run consumes 1 run
-                  const canRunNormal = runsUsed < effectiveMax && currentEnergyInt >= normalCost
+                // normal run consumes 1 run
+                const canRunNormal = runsUsed < effectiveMax && currentEnergyInt >= normalCost
 
-                  // juiced run consumes 3 runs at once, must not exceed juicedMax
-                  const canRunJuiced =
-                      isPlayerJuiced &&
-                      runsUsed + 3 <= juicedMax &&
-                      currentEnergyInt >= juicedCost
+                // juiced run consumes 3 runs at once, must not exceed juicedMax
+                const canRunJuiced =
+                  isPlayerJuiced && runsUsed + 3 <= juicedMax && currentEnergyInt >= juicedCost
 
-                  return (
-                      <div key={dungeonId} style={{ margin: '8px 0' }}>
-                        <div>
-                          <strong>
-                            {data.NAME_CID} (ID={dungeonId}) | Runs: {runsUsed} / {effectiveMax}
-                          </strong>
-                        </div>
-                        <button
-                            disabled={!canRunNormal}
-                            style={{ marginRight: 6, color: canRunNormal ? 'inherit' : 'red' }}
-                            onClick={() => handleStartRun(dungeonId, false)}
-                        >
-                          Start Normal ({normalCost} energy)
-                        </button>
-                        {isPlayerJuiced && (
-                            <button
-                                disabled={!canRunJuiced}
-                                style={{ color: canRunJuiced ? 'inherit' : 'red' }}
-                                onClick={() => handleStartRun(dungeonId, true)}
-                            >
-                              Start Juiced ({juicedCost} energy)
-                            </button>
-                        )}
-                      </div>
-                  )
-                })}
-              </section>
+                return (
+                  <div key={dungeonId} style={{ margin: '8px 0' }}>
+                    <div>
+                      <strong>
+                        {data.NAME_CID} (ID={dungeonId}) | Runs: {runsUsed} / {effectiveMax}
+                      </strong>
+                    </div>
+                    <button
+                      disabled={!canRunNormal}
+                      style={{ marginRight: 6, color: canRunNormal ? 'inherit' : 'red' }}
+                      onClick={() => handleStartRun(dungeonId, false)}
+                    >
+                      Start Normal ({normalCost} energy)
+                    </button>
+                    {isPlayerJuiced && (
+                      <button
+                        disabled={!canRunJuiced}
+                        style={{ color: canRunJuiced ? 'inherit' : 'red' }}
+                        onClick={() => handleStartRun(dungeonId, true)}
+                      >
+                        Start Juiced ({juicedCost} energy)
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </section>
           )}
 
           {/* Combined run recap (enemies + items) */}
@@ -513,7 +530,7 @@ export default function DashboardPage() {
             finalEnemiesDefeated={finalEnemiesDefeated}
           />
 
-          <BattleLogsPanel logs={battleHistory} />
+          {/*<BattleLogsPanel logs={battleHistory} />*/}
 
           {/* Panel showing entire local run history */}
           <RunHistoryPanel />
@@ -583,29 +600,29 @@ function PlayerStatsPanel({ title, player }: { title: string; player?: Player })
   )
 }
 
-function BattleLogsPanel({ logs }: { logs: StepLog[] }) {
-  if (!logs.length) return null
-
-  return (
-    <div style={{ marginTop: 20 }}>
-      <h3>Battle History</h3>
-      {logs.map((log, idx) => (
-        <div key={log.timestamp} style={{ borderBottom: '1px solid #aaa', padding: '4px 0' }}>
-          <p>
-            <strong>Step {idx + 1}</strong> - {new Date(log.timestamp).toLocaleTimeString()}
-          </p>
-          <p>
-            User Move: {log.userMove} | Enemy Move: {log.enemyMove}
-          </p>
-          <p>
-            HP: {log.userHPBefore} =&gt; {log.userHPAfter} (You), {log.enemyHPBefore} =&gt;{' '}
-            {log.enemyHPAfter} (Enemy)
-          </p>
-        </div>
-      ))}
-    </div>
-  )
-}
+// function BattleLogsPanel({ logs }: { logs: StepLog[] }) {
+//   if (!logs.length) return null
+//
+//   return (
+//     <div style={{ marginTop: 20 }}>
+//       <h3>Battle History</h3>
+//       {logs.map((log, idx) => (
+//         <div key={log.timestamp} style={{ borderBottom: '1px solid #aaa', padding: '4px 0' }}>
+//           <p>
+//             <strong>Step {idx + 1}</strong> - {new Date(log.timestamp).toLocaleTimeString()}
+//           </p>
+//           <p>
+//             User Move: {log.userMove} | Enemy Move: {log.enemyMove}
+//           </p>
+//           <p>
+//             HP: {log.userHPBefore} =&gt; {log.userHPAfter} (You), {log.enemyHPBefore} =&gt;{' '}
+//             {log.enemyHPAfter} (Enemy)
+//           </p>
+//         </div>
+//       ))}
+//     </div>
+//   )
+// }
 
 function LootOptionsPanel({
   lootOptions,

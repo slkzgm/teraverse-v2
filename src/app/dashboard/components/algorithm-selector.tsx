@@ -1,4 +1,4 @@
-// path: src/components/algorithm-selector.tsx
+// path: src/app/dashboard/components/algorithm-selector.tsx
 'use client'
 
 import React from 'react'

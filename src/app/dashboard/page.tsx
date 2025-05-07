@@ -14,7 +14,7 @@ import { useAuthStore } from '@/store/useAuthStore'
 import { useGigaverseStore } from '@/store/useGigaverseStore'
 import { useAlgorithmStore } from '@/store/useAlgorithmStore'
 import { useGameDataStore } from '@/store/useGameDataStore'
-import AlgorithmSelector from '@/components/algorithm-selector'
+import AlgorithmSelector from '@/app/dashboard/components/algorithm-selector'
 import {
   MctsAlgorithm,
   type GigaverseActionType,
@@ -22,8 +22,10 @@ import {
 } from '@slkzgm/gigaverse-engine'
 import { silentLogger } from '@/utils/silentLogger'
 import type { GameItemBalanceChange, DungeonData, LootOption } from '@slkzgm/gigaverse-sdk'
-import { DailyDungeonsPanel } from '@/components/dashboard/daily-dungeons-panel'
-import { RunRecapPanel } from '@/components/dashboard/run-recap-panel'
+import { DailyDungeonsPanel } from '@/app/dashboard/components/daily-dungeons-panel'
+import { RunRecapPanel } from '@/app/dashboard/components/run-recap-panel'
+import { useRunHistoryStore } from '@/store/useRunHistoryStore'
+import { RunHistoryPanel } from '@/app/dashboard/components/run-history-panel'
 
 interface StepLog {
   userMove: string
@@ -44,7 +46,7 @@ export default function DashboardPage() {
   const router = useRouter()
   const { bearerToken, expiresAt } = useAuthStore()
 
-  // Zustand stores
+  // Core Zustand stores
   const {
     dungeonState,
     energyData,
@@ -70,19 +72,21 @@ export default function DashboardPage() {
   const [localError, setLocalError] = useState('')
   const [balanceChangesHistory, setBalanceChangesHistory] = useState<GameItemBalanceChange[]>([])
   const [battleHistory, setBattleHistory] = useState<StepLog[]>([])
-
-  /**
-   * finalEnemiesDefeated: recorded once the run ends (due to death or completion).
-   * Shown in the new RunRecapPanel if there's no active run.
-   */
   const [finalEnemiesDefeated, setFinalEnemiesDefeated] = useState(0)
 
-  // MCTS ref & auto-play state
+  // Tracking current run's dungeon name & mode (juiced/normal)
+  const [currentDungeonName, setCurrentDungeonName] = useState('')
+  const [currentDungeonIsJuiced, setCurrentDungeonIsJuiced] = useState(false)
+
+  // Local run history store
+  const { addRun } = useRunHistoryStore()
+
+  // Refs for MCTS and auto-play
   const mctsRef = useRef<MctsAlgorithm | null>(null)
   const isAutoPlayingRef = useRef(false)
 
   // ------------------------------------------------
-  // Setup selected algorithm
+  // Algorithm Setup
   // ------------------------------------------------
   useEffect(() => {
     if (selectedAlgorithm === 'mcts') {
@@ -93,7 +97,7 @@ export default function DashboardPage() {
   }, [selectedAlgorithm])
 
   // ------------------------------------------------
-  // Validate token on mount
+  // Validate Token on Mount
   // ------------------------------------------------
   useEffect(() => {
     async function checkAccess() {
@@ -117,20 +121,20 @@ export default function DashboardPage() {
   }, [bearerToken, expiresAt, router])
 
   // ------------------------------------------------
-  // Once validated, load core data (offchain, day progress, energy)
+  // Load offchain data, day progress, energy
   // ------------------------------------------------
   useEffect(() => {
     if (!bearerToken || isChecking) return
 
-    // Offchain data
+    // If we haven't loaded them yet
     if (enemies.length === 0 && gameItems.length === 0) {
       loadOffchainStatic(bearerToken)
     }
 
     loadTodayDungeonData(bearerToken)
     loadDayProgress(bearerToken)
-
     loadEnergy(bearerToken)
+
     return () => {
       stopEnergyTimer()
     }
@@ -147,7 +151,7 @@ export default function DashboardPage() {
   ])
 
   // ------------------------------------------------
-  // Auto-fetch dungeon on mount
+  // Fetch dungeon on mount => show current run
   // ------------------------------------------------
   useEffect(() => {
     if (!bearerToken || isChecking) return
@@ -163,7 +167,7 @@ export default function DashboardPage() {
   }, [bearerToken, isChecking])
 
   // ------------------------------------------------
-  // Auto-play chain
+  // Auto-play
   // ------------------------------------------------
   useEffect(() => {
     if (autoPlay) {
@@ -174,14 +178,13 @@ export default function DashboardPage() {
   }, [autoPlay])
 
   // =============================
-  // Moves / Helpers
+  // Utility / Helper Logic
   // =============================
   function getRecommendedMove(): GigaverseActionType | null {
-    const ds = dungeonState
+    const ds = useGigaverseStore.getState().dungeonState
     if (!ds) return null
 
     if (selectedAlgorithm === 'manual') return null
-
     if (selectedAlgorithm === 'random') {
       const possible: GigaverseActionType[] = []
       if (ds.run?.lootPhase && ds.run.lootOptions?.length) {
@@ -193,7 +196,6 @@ export default function DashboardPage() {
       }
       return possible[Math.floor(Math.random() * possible.length)]
     }
-
     if (selectedAlgorithm === 'mcts' && mctsRef.current) {
       try {
         const runState = buildGigaverseRunState(ds, enemies)
@@ -205,6 +207,17 @@ export default function DashboardPage() {
     return null
   }
 
+  /**
+   * Collect item changes in a single map: itemId => total
+   */
+  function getAggregatedItemChanges() {
+    const map: Record<number, number> = {}
+    for (const c of balanceChangesHistory) {
+      map[c.id] = (map[c.id] || 0) + c.amount
+    }
+    return map
+  }
+
   async function handlePlayMove(move: GigaverseActionType) {
     if (!bearerToken) {
       setLocalError('No bearer token. Please re-login.')
@@ -212,11 +225,12 @@ export default function DashboardPage() {
     }
     setLocalError('')
 
-    if (!dungeonState?.run) return
+    const ds = dungeonState
+    if (!ds?.run) return
 
-    const userHPBefore = dungeonState.run.players[0].health.current
-    const enemyHPBefore = dungeonState.run.players[1].health.current
-    const dungeonId = dungeonState.entity?.ID_CID ? parseInt(dungeonState.entity.ID_CID) : 1
+    const userHPBefore = ds.run.players[0].health.current
+    const enemyHPBefore = ds.run.players[1].health.current
+    const dungeonId = ds.entity?.ID_CID ? parseInt(ds.entity.ID_CID) : 1
     const { actionToken } = useGigaverseStore.getState()
 
     try {
@@ -225,10 +239,12 @@ export default function DashboardPage() {
         throw new Error(result.message || 'Failed to play move.')
       }
 
+      // If we got item changes this step, merge them into our local array
       if (result.gameItemBalanceChanges?.length) {
         setBalanceChangesHistory((prev) => [...prev, ...result.gameItemBalanceChanges!])
       }
 
+      // Grab updated dungeonState
       const dsAfter = useGigaverseStore.getState().dungeonState
       if (!dsAfter?.run) return
 
@@ -237,6 +253,7 @@ export default function DashboardPage() {
       const userMove = dsAfter.run.players[0].lastMove || move
       const enemyMove = dsAfter.run.players[1].lastMove || 'unknown'
 
+      // Record a step in local battleHistory
       setBattleHistory((prev) => [
         ...prev,
         {
@@ -255,16 +272,6 @@ export default function DashboardPage() {
     }
   }
 
-  async function handleFetchDungeon() {
-    if (!bearerToken) return
-    setLocalError('')
-
-    const result = await callGigaverseAction(fetchDungeonState, bearerToken)
-    if (!result.success) {
-      setLocalError(result.message || 'Failed to fetch dungeon.')
-    }
-  }
-
   async function handleStartRun(dungeonId: number, isJuiced: boolean) {
     if (!bearerToken) return
     setLocalError('')
@@ -277,21 +284,36 @@ export default function DashboardPage() {
       dungeonId,
       isJuiced
     )
-
     if (!result.success) {
       setLocalError(result.message || 'Failed to start run.')
       return
     }
-    // Clear local logs
+
+    // Clear existing logs
     setBattleHistory([])
     setBalanceChangesHistory([])
     setFinalEnemiesDefeated(0)
 
-    // For daily usage: normal => +1, juiced => +3
+    // Name + juiced flags, for local run recap
+    const dsName = todayDungeonsMap[dungeonId]?.NAME_CID ?? `Dungeon #${dungeonId}`
+    setCurrentDungeonName(dsName)
+    setCurrentDungeonIsJuiced(isJuiced)
+
+    // In daily usage: normal => +1, juiced => +3
     incrementRunCount(dungeonId, isJuiced ? 3 : 1)
 
     // Refresh energy
     await loadEnergy(bearerToken)
+  }
+
+  async function handleFetchDungeon() {
+    if (!bearerToken) return
+    setLocalError('')
+
+    const result = await callGigaverseAction(fetchDungeonState, bearerToken)
+    if (!result.success) {
+      setLocalError(result.message || 'Failed to fetch dungeon.')
+    }
   }
 
   async function refreshAll() {
@@ -316,7 +338,8 @@ export default function DashboardPage() {
   }
 
   /**
-   * Checks if run ended => setAutoPlay(false), store final enemies defeated, refresh dungeon.
+   * When run ends => set finalEnemiesDefeated, store aggregator in local history,
+   * then refresh the dungeon so we see no active run. We also setAutoPlay(false).
    */
   async function checkRunOverAndRefresh(): Promise<boolean> {
     const ds = useGigaverseStore.getState().dungeonState
@@ -327,22 +350,31 @@ export default function DashboardPage() {
     }
 
     const userHP = ds.run.players[0].health.current
-    if (userHP <= 0) {
-      // user died => set final enemies defeated
-      setFinalEnemiesDefeated(ds.entity?.ROOM_NUM_CID ? ds.entity.ROOM_NUM_CID - 1 : 0)
+    const roomNum = ds.entity?.ROOM_NUM_CID ?? 1
+    const ended = userHP <= 0 || ds.entity?.COMPLETE_CID
+
+    if (ended) {
       setAutoPlay(false)
+
+      const finalEnemies = Math.max(0, roomNum - 1)
+      setFinalEnemiesDefeated(finalEnemies)
+
+      // Build itemChanges from the entire run
+      const itemChanges = getAggregatedItemChanges()
+
+      // Add local run recap => local storage
+      useRunHistoryStore.getState().addRun({
+        dungeonId: ds.entity?.ID_CID ? parseInt(ds.entity.ID_CID) : 0,
+        dungeonName: currentDungeonName,
+        isJuiced: currentDungeonIsJuiced,
+        enemiesDefeated: finalEnemies,
+        timestamp: Date.now(),
+        itemChanges,
+      })
+
       await refreshDungeon()
       return true
     }
-
-    if (ds.entity?.COMPLETE_CID) {
-      // run complete => also set final enemies
-      setFinalEnemiesDefeated(ds.entity.ROOM_NUM_CID ? ds.entity.ROOM_NUM_CID - 1 : 0)
-      setAutoPlay(false)
-      await refreshDungeon()
-      return true
-    }
-
     return false
   }
 
@@ -372,7 +404,7 @@ export default function DashboardPage() {
   }
 
   // =============================
-  // Derived values
+  // Computed / Derived
   // =============================
   let displayedEnergy = 'N/A'
   let currentEnergyInt = 0
@@ -380,7 +412,7 @@ export default function DashboardPage() {
   if (energyData) {
     currentEnergyInt = Math.floor(energyData.energy / 1_000_000_000)
     displayedEnergy = currentEnergyInt.toString()
-    isPlayerJuiced = Boolean(energyData.isPlayerJuiced)
+    isPlayerJuiced = !!energyData.isPlayerJuiced
   }
 
   // =============================
@@ -397,6 +429,7 @@ export default function DashboardPage() {
       ) : (
         <>
           {localError && <p style={{ color: 'red' }}>{localError}</p>}
+
           <h1>Dashboard - Extended UI</h1>
           <AlgorithmSelector />
 
@@ -513,6 +546,7 @@ export default function DashboardPage() {
             </section>
           )}
 
+          {/* Combined run recap (enemies + items) */}
           <RunRecapPanel
             changes={balanceChangesHistory}
             dungeonState={dungeonState}
@@ -520,15 +554,18 @@ export default function DashboardPage() {
           />
 
           <BattleLogsPanel logs={battleHistory} />
+
+          {/* Panel showing entire local run history */}
+          <RunHistoryPanel />
         </>
       )}
     </main>
   )
 }
 
-// ------------------------------------------------
+// -----------------------------------------------
 // Helper sub-components
-// ------------------------------------------------
+// -----------------------------------------------
 function DungeonRoomInfo({ entity }: { entity: DungeonData['entity'] }) {
   if (!entity) return null
   const roomNum = entity.ROOM_NUM_CID
@@ -569,7 +606,6 @@ function PlayerStatsPanel({ title, player }: { title: string; player?: any }) {
       <p>
         Armor: {shield} / {maxShield}
       </p>
-
       <p>
         Rock — Charges: {player.rock?.currentCharges ?? 0}, ATK: {player.rock?.currentATK ?? 0},
         DEF: {player.rock?.currentDEF ?? 0}
@@ -582,7 +618,6 @@ function PlayerStatsPanel({ title, player }: { title: string; player?: any }) {
         Scissor — Charges: {player.scissor?.currentCharges ?? 0}, ATK:{' '}
         {player.scissor?.currentATK ?? 0}, DEF: {player.scissor?.currentDEF ?? 0}
       </p>
-
       <p>Last Move: {player.lastMove || 'None'}</p>
     </div>
   )

@@ -1,14 +1,8 @@
 // path: src/app/dashboard/page.tsx
 'use client'
 
-import React, { useEffect, useState, useRef } from 'react'
-import { useRouter } from 'next/navigation'
-import {
-  validateTokenAction,
-  fetchDungeonState,
-  playMove,
-  startRunAction,
-} from '@/actions/gigaverseActions'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { fetchDungeonStateAction, playMoveAction, startRunAction } from '@/actions/gigaverseActions'
 import { callGigaverseAction } from '@/utils/callGigaverseAction'
 import { useAuthStore } from '@/store/useAuthStore'
 import { useGigaverseStore } from '@/store/useGigaverseStore'
@@ -16,12 +10,12 @@ import { useAlgorithmStore } from '@/store/useAlgorithmStore'
 import { useGameDataStore } from '@/store/useGameDataStore'
 import AlgorithmSelector from '@/app/dashboard/components/algorithm-selector'
 import {
-  MctsAlgorithm,
-  type GigaverseActionType,
   buildGigaverseRunState,
+  MctsAlgorithm,
+  GigaverseActionType,
 } from '@slkzgm/gigaverse-engine'
 import { silentLogger } from '@/utils/silentLogger'
-import type { GameItemBalanceChange, DungeonData, LootOption } from '@slkzgm/gigaverse-sdk'
+import type { DungeonData, GameItemBalanceChange, LootOption, Player } from '@slkzgm/gigaverse-sdk'
 import { DailyDungeonsPanel } from '@/app/dashboard/components/daily-dungeons-panel'
 import { RunRecapPanel } from '@/app/dashboard/components/run-recap-panel'
 import { useRunHistoryStore } from '@/store/useRunHistoryStore'
@@ -43,8 +37,7 @@ const mctsConfig = {
 }
 
 export default function DashboardPage() {
-  const router = useRouter()
-  const { bearerToken, expiresAt } = useAuthStore()
+  const { bearerToken } = useAuthStore()
 
   // Core Zustand stores
   const {
@@ -71,7 +64,6 @@ export default function DashboardPage() {
   const { selectedAlgorithm, autoPlay, setAutoPlay } = useAlgorithmStore()
 
   // Local states
-  const [isChecking, setIsChecking] = useState(true)
   const [localError, setLocalError] = useState('')
   const [balanceChangesHistory, setBalanceChangesHistory] = useState<GameItemBalanceChange[]>([])
   const [battleHistory, setBattleHistory] = useState<StepLog[]>([])
@@ -100,34 +92,10 @@ export default function DashboardPage() {
   }, [selectedAlgorithm])
 
   // ------------------------------------------------
-  // Validate Token on Mount
-  // ------------------------------------------------
-  useEffect(() => {
-    async function checkAccess() {
-      if (!bearerToken || (expiresAt && Date.now() > expiresAt)) {
-        router.push('/')
-        return
-      }
-      try {
-        const result = await validateTokenAction(bearerToken)
-        if (!result.success || !result.canEnterGame || !result.address) {
-          router.push('/')
-        }
-      } catch (err) {
-        console.error('[Dashboard] Token validation error:', err)
-        router.push('/')
-      } finally {
-        setIsChecking(false)
-      }
-    }
-    checkAccess()
-  }, [bearerToken, expiresAt, router])
-
-  // ------------------------------------------------
   // Load offchain data, day progress, energy
   // ------------------------------------------------
   useEffect(() => {
-    if (!bearerToken || isChecking) return
+    if (!bearerToken || !address) return
 
     // If we haven't loaded them yet
     if (enemies.length === 0 && gameItems.length === 0) {
@@ -143,7 +111,7 @@ export default function DashboardPage() {
     }
   }, [
     bearerToken,
-    isChecking,
+    address,
     enemies,
     gameItems,
     loadOffchainStatic,
@@ -157,36 +125,88 @@ export default function DashboardPage() {
   // Fetch dungeon on mount => show current run
   // ------------------------------------------------
   useEffect(() => {
-    if (!bearerToken || isChecking) return
+    if (!bearerToken) return
 
     async function fetchOnMount() {
       setLocalError('')
-      const result = await callGigaverseAction(fetchDungeonState, bearerToken)
+      const result = await callGigaverseAction(fetchDungeonStateAction, bearerToken!)
       if (!result.success) {
         setLocalError(result.message || 'Failed to fetch dungeon on mount.')
       }
     }
     fetchOnMount()
-  }, [bearerToken, isChecking])
+  }, [bearerToken])
 
   // ------------------------------------------------
   // Auto-play
   // ------------------------------------------------
-  useEffect(() => {
-    if (autoPlay) {
-      runAutoPlayChain()
-    } else {
-      isAutoPlayingRef.current = false
+
+  // 1) Memoize getAggregatedItemChanges
+  const getAggregatedItemChanges = useCallback(() => {
+    const map: Record<number, number> = {}
+    for (const c of balanceChangesHistory) {
+      map[c.id] = (map[c.id] || 0) + c.amount
     }
-  }, [autoPlay])
+    return map
+  }, [balanceChangesHistory])
+
+  // 2) Memoize refreshDungeon
+  const refreshDungeon = useCallback(async () => {
+    if (!bearerToken) return
+    await callGigaverseAction(fetchDungeonStateAction, bearerToken)
+  }, [bearerToken])
+
+  // 3) Memoize checkRunOverAndRefresh (uses the two callbacks above)
+  const checkRunOverAndRefresh = useCallback(async (): Promise<boolean> => {
+    const ds = useGigaverseStore.getState().dungeonState
+    if (!ds || !ds.run) {
+      setAutoPlay(false)
+      await refreshDungeon()
+      return true
+    }
+    const ended = ds.run.players[0].health.current <= 0 || !!ds.entity?.COMPLETE_CID
+    if (ended) {
+      setAutoPlay(false)
+
+      const roomNum = ds.entity?.ROOM_NUM_CID ?? 1
+      const finalEnemies = Math.max(0, roomNum - 1)
+      setFinalEnemiesDefeated(finalEnemies)
+
+      const itemChanges = getAggregatedItemChanges()
+      addRun({
+        address: address!,
+        username: username!,
+        noobId: noobId!,
+        dungeonId: ds.entity?.ID_CID ? parseInt(ds.entity.ID_CID) : 0,
+        dungeonName: currentDungeonName,
+        isJuiced: currentDungeonIsJuiced,
+        enemiesDefeated: finalEnemies,
+        timestamp: Date.now(),
+        itemChanges,
+      })
+
+      await refreshDungeon()
+      return true
+    }
+    return false
+  }, [
+    address,
+    username,
+    noobId,
+    currentDungeonName,
+    currentDungeonIsJuiced,
+    getAggregatedItemChanges,
+    refreshDungeon,
+    setAutoPlay,
+    addRun,
+  ])
 
   // =============================
   // Utility / Helper Logic
   // =============================
-  function getRecommendedMove(): GigaverseActionType | null {
+  const getRecommendedMove = useCallback((): GigaverseActionType | null => {
     const ds = useGigaverseStore.getState().dungeonState
     if (!ds) return null
-
     if (selectedAlgorithm === 'manual') return null
     if (selectedAlgorithm === 'random') {
       const possible: GigaverseActionType[] = []
@@ -195,85 +215,73 @@ export default function DashboardPage() {
           possible.push(`loot_${idx + 1}` as GigaverseActionType)
         })
       } else {
-        possible.push('rock', 'paper', 'scissor')
+        possible.push(
+          'rock' as GigaverseActionType,
+          'paper' as GigaverseActionType,
+          'scissor' as GigaverseActionType
+        )
       }
       return possible[Math.floor(Math.random() * possible.length)]
     }
     if (selectedAlgorithm === 'mcts' && mctsRef.current) {
       try {
-        const runState = buildGigaverseRunState(ds, enemies)
-        return mctsRef.current.pickAction(runState).type
-      } catch (err) {
-        console.error('[Dashboard] MCTS pickAction error:', err)
+        if (!ds.run) return null
+
+        const actionData = buildGigaverseRunState(ds, useGameDataStore.getState().enemies)
+
+        return mctsRef.current.pickAction(actionData).type
+      } catch {
+        return null
       }
     }
     return null
-  }
+  }, [selectedAlgorithm])
 
-  /**
-   * Collect item changes in a single map: itemId => total
-   */
-  function getAggregatedItemChanges() {
-    const map: Record<number, number> = {}
-    for (const c of balanceChangesHistory) {
-      map[c.id] = (map[c.id] || 0) + c.amount
-    }
-    return map
-  }
+  const handlePlayMove = useCallback(
+    async (move: GigaverseActionType) => {
+      if (!bearerToken) return
+      const ds = useGigaverseStore.getState().dungeonState
+      if (!ds?.run) return
 
-  async function handlePlayMove(move: GigaverseActionType) {
-    if (!bearerToken) {
-      setLocalError('No bearer token. Please re-login.')
-      return
-    }
-    setLocalError('')
+      try {
+        const result = await callGigaverseAction(
+          playMoveAction,
+          bearerToken,
+          useGigaverseStore.getState().actionToken,
+          Number(ds.entity?.ID_CID),
+          move
+        )
+        if (result.gameItemBalanceChanges?.length) {
+          setBalanceChangesHistory((prev) => [...prev, ...result.gameItemBalanceChanges!])
+        }
+      } catch (err) {
+        console.error('[Dashboard] handlePlayMove error:', err)
+      }
+    },
+    [bearerToken]
+  )
 
-    const ds = dungeonState
-    if (!ds?.run) return
-
-    const userHPBefore = ds.run.players[0].health.current
-    const enemyHPBefore = ds.run.players[1].health.current
-    const dungeonId = ds.entity?.ID_CID ? parseInt(ds.entity.ID_CID) : 1
-    const { actionToken } = useGigaverseStore.getState()
+  const runAutoPlayChain = useCallback(async () => {
+    if (isAutoPlayingRef.current) return
+    isAutoPlayingRef.current = true
 
     try {
-      const result = await callGigaverseAction(playMove, bearerToken, actionToken, dungeonId, move)
-      if (!result.success) {
-        throw new Error(result.message || 'Failed to play move.')
+      let steps = 60
+      while (useAlgorithmStore.getState().autoPlay && steps > 0) {
+        if (await checkRunOverAndRefresh()) break
+        const move = getRecommendedMove()
+        if (!move) break
+        await handlePlayMove(move)
+        await new Promise((res) => setTimeout(res, 50))
+        steps--
       }
-
-      // If we got item changes this step, merge them into our local array
-      if (result.gameItemBalanceChanges?.length) {
-        setBalanceChangesHistory((prev) => [...prev, ...result.gameItemBalanceChanges!])
-      }
-
-      // Grab updated dungeonState
-      const dsAfter = useGigaverseStore.getState().dungeonState
-      if (!dsAfter?.run) return
-
-      const userHPAfter = dsAfter.run.players[0].health.current
-      const enemyHPAfter = dsAfter.run.players[1].health.current
-      const userMove = dsAfter.run.players[0].lastMove || move
-      const enemyMove = dsAfter.run.players[1].lastMove || 'unknown'
-
-      // Record a step in local battleHistory
-      setBattleHistory((prev) => [
-        ...prev,
-        {
-          userMove,
-          enemyMove,
-          userHPBefore,
-          userHPAfter,
-          enemyHPBefore,
-          enemyHPAfter,
-          timestamp: Date.now(),
-        },
-      ])
-    } catch (err) {
-      console.error('[Dashboard] handlePlayMove error:', err)
-      setLocalError(err instanceof Error ? err.message : 'Move error.')
+      await checkRunOverAndRefresh()
+    } catch (error) {
+      console.error('[runAutoPlayChain] error:', error)
+    } finally {
+      isAutoPlayingRef.current = false
     }
-  }
+  }, [checkRunOverAndRefresh, getRecommendedMove, handlePlayMove])
 
   async function handleStartRun(dungeonId: number, isJuiced: boolean) {
     if (!bearerToken) return
@@ -283,7 +291,7 @@ export default function DashboardPage() {
     const result = await callGigaverseAction(
       startRunAction,
       bearerToken,
-      actionToken,
+      actionToken || '',
       dungeonId,
       isJuiced
     )
@@ -313,7 +321,7 @@ export default function DashboardPage() {
     if (!bearerToken) return
     setLocalError('')
 
-    const result = await callGigaverseAction(fetchDungeonState, bearerToken)
+    const result = await callGigaverseAction(fetchDungeonStateAction, bearerToken)
     if (!result.success) {
       setLocalError(result.message || 'Failed to fetch dungeon.')
     }
@@ -325,7 +333,7 @@ export default function DashboardPage() {
     try {
       await Promise.all([
         loadEnergy(bearerToken),
-        callGigaverseAction(fetchDungeonState, bearerToken),
+        callGigaverseAction(fetchDungeonStateAction, bearerToken),
         loadDayProgress(bearerToken),
         loadTodayDungeonData(bearerToken),
       ])
@@ -335,79 +343,10 @@ export default function DashboardPage() {
     }
   }
 
-  async function refreshDungeon() {
-    if (!bearerToken) return
-    await callGigaverseAction(fetchDungeonState, bearerToken)
-  }
-
-  /**
-   * When run ends => set finalEnemiesDefeated, store aggregator in local history,
-   * then refresh the dungeon so we see no active run. We also setAutoPlay(false).
-   */
-  async function checkRunOverAndRefresh(): Promise<boolean> {
-    const ds = useGigaverseStore.getState().dungeonState
-    if (!ds || !ds.run) {
-      setAutoPlay(false)
-      await refreshDungeon()
-      return true
-    }
-
-    const userHP = ds.run.players[0].health.current
-    const roomNum = ds.entity?.ROOM_NUM_CID ?? 1
-    const ended = userHP <= 0 || ds.entity?.COMPLETE_CID
-
-    if (ended) {
-      setAutoPlay(false)
-
-      const finalEnemies = Math.max(0, roomNum - 1)
-      setFinalEnemiesDefeated(finalEnemies)
-
-      // Build itemChanges from the entire run
-      const itemChanges = getAggregatedItemChanges()
-
-      // Add local run recap => local storage
-      addRun({
-        address,
-        username,
-        noobId,
-        dungeonId: ds.entity?.ID_CID ? parseInt(ds.entity.ID_CID) : 0,
-        dungeonName: currentDungeonName,
-        isJuiced: currentDungeonIsJuiced,
-        enemiesDefeated: finalEnemies,
-        timestamp: Date.now(),
-        itemChanges,
-      })
-
-      await refreshDungeon()
-      return true
-    }
-    return false
-  }
-
-  async function runAutoPlayChain() {
-    if (isAutoPlayingRef.current) return
-    isAutoPlayingRef.current = true
-
-    try {
-      let steps = 60
-      while (useAlgorithmStore.getState().autoPlay && steps > 0) {
-        const ended = await checkRunOverAndRefresh()
-        if (ended) break
-
-        const move = getRecommendedMove()
-        if (!move) break
-
-        await handlePlayMove(move)
-        await new Promise((r) => setTimeout(r, 50))
-        steps--
-      }
-      await checkRunOverAndRefresh()
-    } catch (err) {
-      console.error('[AutoPlayChain] error:', err)
-    } finally {
-      isAutoPlayingRef.current = false
-    }
-  }
+  useEffect(() => {
+    if (autoPlay) runAutoPlayChain()
+    else isAutoPlayingRef.current = false
+  }, [autoPlay, runAutoPlayChain])
 
   // =============================
   // Computed / Derived
@@ -418,7 +357,7 @@ export default function DashboardPage() {
   if (energyData) {
     currentEnergyInt = Math.floor(energyData.energy / 1_000_000_000)
     displayedEnergy = currentEnergyInt.toString()
-    isPlayerJuiced = !!energyData.isPlayerJuiced
+    isPlayerJuiced = energyData.isPlayerJuiced
   }
 
   // =============================
@@ -426,9 +365,7 @@ export default function DashboardPage() {
   // =============================
   return (
     <main style={{ padding: 20 }}>
-      {isChecking ? (
-        <p>Checking your session...</p>
-      ) : isLoading ? (
+      {isLoading ? (
         <p>Loading data from server...</p>
       ) : error ? (
         <p style={{ color: 'red' }}>{error}</p>
@@ -470,13 +407,25 @@ export default function DashboardPage() {
 
               <div style={{ marginTop: 20 }}>
                 <h3>Manual Moves</h3>
-                <button onClick={() => handlePlayMove('rock')}>Rock</button>
-                <button onClick={() => handlePlayMove('paper')}>Paper</button>
-                <button onClick={() => handlePlayMove('scissor')}>Scissor</button>
-                <button onClick={() => handlePlayMove('loot_one')}>Loot One</button>
-                <button onClick={() => handlePlayMove('loot_two')}>Loot Two</button>
-                <button onClick={() => handlePlayMove('loot_three')}>Loot Three</button>
-                <button onClick={() => handlePlayMove('loot_four')}>Loot Four</button>
+                <button onClick={() => handlePlayMove(GigaverseActionType.MOVE_ROCK)}>Rock</button>
+                <button onClick={() => handlePlayMove(GigaverseActionType.MOVE_PAPER)}>
+                  Paper
+                </button>
+                <button onClick={() => handlePlayMove(GigaverseActionType.MOVE_SCISSOR)}>
+                  Scissor
+                </button>
+                <button onClick={() => handlePlayMove(GigaverseActionType.PICK_LOOT_ONE)}>
+                  Loot One
+                </button>
+                <button onClick={() => handlePlayMove(GigaverseActionType.PICK_LOOT_TWO)}>
+                  Loot Two
+                </button>
+                <button onClick={() => handlePlayMove(GigaverseActionType.PICK_LOOT_THREE)}>
+                  Loot Three
+                </button>
+                <button onClick={() => handlePlayMove(GigaverseActionType.PICK_LOOT_FOUR)}>
+                  Loot Four
+                </button>
               </div>
 
               {selectedAlgorithm !== 'manual' && (
@@ -588,7 +537,7 @@ function DungeonRoomInfo({ entity }: { entity: DungeonData['entity'] }) {
   )
 }
 
-function PlayerStatsPanel({ title, player }: { title: string; player?: any }) {
+function PlayerStatsPanel({ title, player }: { title: string; player?: Player }) {
   if (!player) {
     return (
       <div>

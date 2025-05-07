@@ -1,13 +1,6 @@
 // path: src/actions/gigaverseActions.ts
 'use server'
 
-/*
-  This file contains all server actions used by our Next.js app.
-  We added getEnergyAction to fetch energy state, and also integrated
-  the logic for consuming energy in startRunAction, which is performed
-  fully on the server side.
-*/
-
 import {
   BaseResponse,
   DungeonData,
@@ -20,9 +13,8 @@ import {
 import {
   GetEnergyResponse,
   GetUserMeResponse,
-  GetAllEnemiesResponse,
-  GetAllGameItemsResponse,
 } from '@slkzgm/gigaverse-sdk/dist/client/types/responses'
+import { GigaverseActionType } from '@slkzgm/gigaverse-engine'
 
 function createClient(token: string) {
   return new GameClient('https://gigaverse.io', token)
@@ -181,7 +173,7 @@ export async function authenticateWithSignature(
 /**
  * Fetch dungeon state
  */
-export async function fetchDungeonState(token: string): Promise<{
+export async function fetchDungeonStateAction(token: string): Promise<{
   success: boolean
   data: DungeonData | null
   message?: string
@@ -267,11 +259,11 @@ export async function startRunAction(
 /**
  * Play a move in the currently active run
  */
-export async function playMove(
+export async function playMoveAction(
   token: string,
   actionToken: string | null,
   dungeonId: number,
-  move: 'rock' | 'paper' | 'scissor' | 'loot_one' | 'loot_two' | 'loot_three'
+  move: GigaverseActionType
 ): Promise<{
   success: boolean
   data: DungeonData | null
@@ -320,10 +312,7 @@ export async function playMove(
 /**
  * Fetch energy
  */
-export async function getEnergyAction(
-  token: string,
-  address: string
-): Promise<GetEnergyResponse & BaseResponse> {
+export async function getEnergyAction(token: string, address: string): Promise<GetEnergyResponse> {
   console.log('[getEnergyAction] Fetching energy data...')
   const client = createClient(token)
   return client.getEnergy(address)

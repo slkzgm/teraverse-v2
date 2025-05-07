@@ -1,32 +1,36 @@
 // path: src/utils/callGigaverseAction.ts
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useGigaverseStore } from '@/store/useGigaverseStore'
-import { BaseResponse } from '@slkzgm/gigaverse-sdk'
 
-export async function callGigaverseAction<T extends BaseResponse>(
-  actionFn: (...args: any[]) => Promise<T>,
-  ...args: any[]
-): Promise<T> {
+/**
+ * Generic wrapper for calling a Gigaverse action, preserving full response type
+ * including any extra fields (e.g., gameItemBalanceChanges).
+ */
+export async function callGigaverseAction<F extends (...args: any[]) => Promise<any>>(
+  actionFn: F,
+  ...args: Parameters<F>
+): Promise<Awaited<ReturnType<F>>> {
   const result = await actionFn(...args)
   console.log('[callGigaverseAction] Received result:', result)
 
-  // 1) If there's a new actionToken, store it
-  if (result.actionToken) {
-    useGigaverseStore.getState().setActionToken(result.actionToken)
+  // If there's an actionToken on the result, update store
+  if ('actionToken' in result) {
+    useGigaverseStore.getState().setActionToken((result as any).actionToken)
   }
 
-  // 2) If data is returned, handle the run/entity logic carefully
-  if (result.data) {
-    // If run=null && entity=null => means no active run => set store to null
-    if (result.data.run === null && result.data.entity === null) {
-      console.log('[callGigaverseAction] No active run => setting dungeonState to null')
-      useGigaverseStore.getState().setDungeonState(null)
-    } else {
-      // Otherwise store the new data in the dungeonState
-      // If you want to ensure a fresh reference, do structuredClone
-      const clonedData = structuredClone(result.data)
-      useGigaverseStore.getState().setDungeonState(clonedData)
+  // If data is present, update dungeonState
+  if ('data' in result) {
+    const d = (result as any).data
+    if (typeof d === 'object' && d !== null && 'run' in d && 'entity' in d) {
+      const run = (d as any).run
+      const entity = (d as any).entity
+      if (run == null && entity == null) {
+        useGigaverseStore.getState().setDungeonState(null)
+      } else {
+        useGigaverseStore.getState().setDungeonState(structuredClone(d))
+      }
     }
   }
 
-  return result
+  return result as Awaited<ReturnType<F>>
 }

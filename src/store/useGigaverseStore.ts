@@ -19,7 +19,7 @@ interface GigaverseState {
   address: string | null
   username: string | null
   noobId: string | null
-  actionToken: string | number | null
+  actionToken: string | null
   dungeonState: DungeonData | null
 
   // ------------------------------------------------------------------
@@ -37,7 +37,7 @@ interface GigaverseState {
   // Methods: auth, day progress, dungeon, etc.
   // ------------------------------------------------------------------
   setUserData: (address: string, username: string, noobId: string) => void
-  setActionToken: (token: string | number) => void
+  setActionToken: (token: string | null) => void
   setDungeonState: (d: DungeonData | null) => void
   clearUserData: () => void
 
@@ -100,25 +100,31 @@ export const useGigaverseStore = create<GigaverseState>((set, get) => ({
   // ------------------------------------------------------------------
   // Energy logic
   // ------------------------------------------------------------------
-  async loadEnergy(token) {
+  async loadEnergy(token: string) {
     console.log('[useGigaverseStore] loadEnergy => calling getEnergyAction...')
     try {
       const address = get().address
       if (!address) {
-        console.warn('[useGigaverseStore] No address, skipping getEnergy')
+        console.warn('[useGigaverseStore] No address, skipping loadEnergy')
         return
       }
 
       const response = await getEnergyAction(token, address)
       console.log('[useGigaverseStore] getEnergyAction response:', response)
 
-      const e = response.entities?.[0]
-      if (!e?.parsedData) {
-        throw new Error(response.message || 'Failed to fetch energy.')
-      }
-      set({ energyData: e.parsedData })
+      // Normalize entities to an array
+      const entities = Array.isArray(response.entities) ? response.entities : [response.entities]
+      const firstEntity = entities[0]
 
-      // schedule next boundary
+      if (!firstEntity?.parsedData) {
+        console.warn('[useGigaverseStore] No parsedData in energy response, skipping.')
+        return
+      }
+
+      // Store the parsed energy data
+      set({ energyData: firstEntity.parsedData })
+
+      // Schedule the next boundary fetch if applicable
       get().scheduleBoundaryFetch(token)
     } catch (err) {
       console.error('[useGigaverseStore] loadEnergy error =>', err)

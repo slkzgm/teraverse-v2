@@ -1,5 +1,4 @@
 // path: src/app/dashboard/page.tsx
-
 'use client'
 
 import React, { useEffect, useState, useRef } from 'react'
@@ -24,6 +23,7 @@ import {
 import { silentLogger } from '@/utils/silentLogger'
 import type { GameItemBalanceChange, DungeonData, LootOption } from '@slkzgm/gigaverse-sdk'
 import { AggregatedChangesPanel } from '@/components/dashboard/aggregated-changes-panel'
+import { DailyDungeonsPanel } from '@/components/dashboard/daily-dungeons-panel'
 
 interface StepLog {
   userMove: string
@@ -43,21 +43,41 @@ const mctsConfig = {
 export default function DashboardPage() {
   const router = useRouter()
   const { bearerToken, expiresAt } = useAuthStore()
-  const { dungeonState, energyData, loadEnergy, stopEnergyTimer } = useGigaverseStore()
-  const { loadOffchainStatic, enemies, gameItems, isLoading, error } = useGameDataStore()
+
+  // Zustand stores
+  const {
+    dungeonState,
+    energyData,
+    stopEnergyTimer,
+    loadEnergy,
+    loadDayProgress,
+    incrementRunCount,
+    dayProgressMap,
+  } = useGigaverseStore()
+  const {
+    loadOffchainStatic,
+    loadTodayDungeonData,
+    enemies,
+    gameItems,
+    todayDungeonsMap,
+    isLoading,
+    error,
+  } = useGameDataStore()
+
   const { selectedAlgorithm, autoPlay, setAutoPlay } = useAlgorithmStore()
 
-  // Local state
+  // Local states
   const [isChecking, setIsChecking] = useState(true)
   const [localError, setLocalError] = useState('')
   const [balanceChangesHistory, setBalanceChangesHistory] = useState<GameItemBalanceChange[]>([])
   const [battleHistory, setBattleHistory] = useState<StepLog[]>([])
 
-  // MCTS ref
   const mctsRef = useRef<MctsAlgorithm | null>(null)
-  // Tracks if we are running the auto-play loop
   const isAutoPlayingRef = useRef(false)
 
+  // ------------------------------------------------
+  // Setup algorithm
+  // ------------------------------------------------
   useEffect(() => {
     if (selectedAlgorithm === 'mcts') {
       mctsRef.current = new MctsAlgorithm(mctsConfig, silentLogger)
@@ -66,9 +86,9 @@ export default function DashboardPage() {
     }
   }, [selectedAlgorithm])
 
-  /**
-   * Validate token on mount. If invalid or expired => redirect home.
-   */
+  // ------------------------------------------------
+  // Validate token on mount
+  // ------------------------------------------------
   useEffect(() => {
     async function checkAccess() {
       if (!bearerToken || (expiresAt && Date.now() > expiresAt)) {
@@ -90,27 +110,38 @@ export default function DashboardPage() {
     checkAccess()
   }, [bearerToken, expiresAt, router])
 
-  /**
-   * Once validated, load game data & energy, start timers, etc.
-   */
+  // ------------------------------------------------
+  // Once validated, load data (offchain static, daily data, energy, etc.)
+  // ------------------------------------------------
   useEffect(() => {
     if (!bearerToken || isChecking) return
 
-    // New single call: loadOffchainStatic
     if (enemies.length === 0 && gameItems.length === 0) {
       loadOffchainStatic(bearerToken)
     }
 
-    // Load energy (and start timers)
+    loadTodayDungeonData(bearerToken)
+    loadDayProgress(bearerToken)
+
     loadEnergy(bearerToken)
     return () => {
       stopEnergyTimer()
     }
-  }, [bearerToken, isChecking, enemies, gameItems, loadOffchainStatic, loadEnergy, stopEnergyTimer])
+  }, [
+    bearerToken,
+    isChecking,
+    enemies,
+    gameItems,
+    loadOffchainStatic,
+    loadTodayDungeonData,
+    loadDayProgress,
+    loadEnergy,
+    stopEnergyTimer,
+  ])
 
-  /**
-   * Auto-fetch dungeon on mount so if a run is already in progress we display it.
-   */
+  // ------------------------------------------------
+  // Auto-fetch dungeon on mount => show current run
+  // ------------------------------------------------
   useEffect(() => {
     if (!bearerToken || isChecking) return
 
@@ -125,6 +156,9 @@ export default function DashboardPage() {
     fetchOnMount()
   }, [bearerToken, isChecking])
 
+  // ------------------------------------------------
+  // Auto-play
+  // ------------------------------------------------
   useEffect(() => {
     if (autoPlay) {
       runAutoPlayChain()
@@ -134,7 +168,7 @@ export default function DashboardPage() {
   }, [autoPlay])
 
   // =============================
-  // Move helpers
+  // Moves & Helpers
   // =============================
   function getRecommendedMove(): GigaverseActionType | null {
     const ds = useGigaverseStore.getState().dungeonState
@@ -166,21 +200,22 @@ export default function DashboardPage() {
   }
 
   async function handlePlayMove(move: GigaverseActionType) {
-    const { bearerToken: currentToken } = useAuthStore.getState()
-    if (!currentToken) {
+    if (!bearerToken) {
       setLocalError('No bearer token. Please re-login.')
       return
     }
     setLocalError('')
 
-    const dsBefore = useGigaverseStore.getState().dungeonState
-    const userHPBefore = dsBefore?.run?.players[0].health.current ?? 0
-    const enemyHPBefore = dsBefore?.run?.players[1].health.current ?? 0
-    const dungeonId = dsBefore?.entity?.ID_CID ? parseInt(dsBefore.entity.ID_CID) : 1
+    const dsBefore = dungeonState
+    if (!dsBefore?.run) return
+
+    const userHPBefore = dsBefore.run.players[0].health.current ?? 0
+    const enemyHPBefore = dsBefore.run.players[1].health.current ?? 0
+    const dungeonId = dsBefore.entity?.ID_CID ? parseInt(dsBefore.entity.ID_CID) : 1
     const { actionToken } = useGigaverseStore.getState()
 
     try {
-      const result = await callGigaverseAction(playMove, currentToken, actionToken, dungeonId, move)
+      const result = await callGigaverseAction(playMove, bearerToken, actionToken, dungeonId, move)
       if (!result.success) {
         throw new Error(result.message || 'Failed to play move.')
       }
@@ -189,11 +224,14 @@ export default function DashboardPage() {
         setBalanceChangesHistory((prev) => [...prev, ...result.gameItemBalanceChanges!])
       }
 
+      // Grab the updated dungeonState from the store
       const dsAfter = useGigaverseStore.getState().dungeonState
-      const userHPAfter = dsAfter?.run?.players[0].health.current ?? 0
-      const enemyHPAfter = dsAfter?.run?.players[1].health.current ?? 0
-      const userMove = dsAfter?.run?.players[0].lastMove || move
-      const enemyMove = dsAfter?.run?.players[1].lastMove || 'unknown'
+      if (!dsAfter?.run) return
+
+      const userHPAfter = dsAfter.run.players[0].health.current ?? 0
+      const enemyHPAfter = dsAfter.run.players[1].health.current ?? 0
+      const userMove = dsAfter.run.players[0].lastMove || move
+      const enemyMove = dsAfter.run.players[1].lastMove || 'unknown'
 
       setBattleHistory((prev) => [
         ...prev,
@@ -213,9 +251,6 @@ export default function DashboardPage() {
     }
   }
 
-  // =============================
-  // Additional UI actions
-  // =============================
   async function handleFetchDungeon() {
     if (!bearerToken) return
     setLocalError('')
@@ -225,10 +260,7 @@ export default function DashboardPage() {
     }
   }
 
-  /**
-   * Clear logs/recap only when starting a new run.
-   */
-  async function handleStartRun(dungeonId: number, isJuiced = false) {
+  async function handleStartRun(dungeonId: number, isJuiced: boolean) {
     if (!bearerToken) return
     setLocalError('')
 
@@ -245,24 +277,30 @@ export default function DashboardPage() {
       setLocalError(result.message || 'Failed to start run.')
       return
     }
-    // Clear only here:
+    // Clear local logs
     setBattleHistory([])
     setBalanceChangesHistory([])
 
+    // For daily usage: normal => +1, juiced => +3
+    incrementRunCount(dungeonId, isJuiced ? 3 : 1)
+
+    // Refresh energy
     await loadEnergy(bearerToken)
   }
 
-  async function refreshDungeonAndEnergy() {
+  async function refreshAll() {
     if (!bearerToken) return
     setLocalError('')
     try {
       await Promise.all([
         loadEnergy(bearerToken),
         callGigaverseAction(fetchDungeonState, bearerToken),
+        loadDayProgress(bearerToken),
+        loadTodayDungeonData(bearerToken),
       ])
     } catch (err) {
-      console.error('[Dashboard] refreshDungeonAndEnergy error:', err)
-      setLocalError('Failed to refresh dungeon or energy.')
+      console.error('[Dashboard] refreshAll error:', err)
+      setLocalError('Failed to refresh all data.')
     }
   }
 
@@ -271,10 +309,6 @@ export default function DashboardPage() {
     await callGigaverseAction(fetchDungeonState, bearerToken)
   }
 
-  /**
-   * If run ends (HP=0 or COMPLETE_CID), we do NOT clear logs.
-   * We only stop auto-play and refresh the dungeon to see "No Active Run".
-   */
   async function checkRunOverAndRefresh(): Promise<boolean> {
     const ds = useGigaverseStore.getState().dungeonState
     if (!ds || !ds.run) {
@@ -286,13 +320,11 @@ export default function DashboardPage() {
     if (userHP <= 0) {
       setAutoPlay(false)
       await refreshDungeon()
-      // Not clearing logs here => user still sees them
       return true
     }
     if (ds.entity?.COMPLETE_CID) {
       setAutoPlay(false)
       await refreshDungeon()
-      // Also not clearing logs
       return true
     }
     return false
@@ -324,16 +356,17 @@ export default function DashboardPage() {
   }
 
   // =============================
-  // Computed rendering
-  // =============================
-  let displayedEnergy = 'N/A'
-  if (energyData) {
-    displayedEnergy = Math.floor(energyData.energy / 1_000_000_000).toString()
-  }
-
-  // =============================
   // Render
   // =============================
+  let displayedEnergy = 'N/A'
+  let currentEnergyInt = 0
+  let isPlayerJuiced = false
+  if (energyData) {
+    currentEnergyInt = Math.floor(energyData.energy / 1_000_000_000)
+    displayedEnergy = currentEnergyInt.toString()
+    isPlayerJuiced = Boolean(energyData.isPlayerJuiced)
+  }
+
   return (
     <main style={{ padding: 20 }}>
       {isChecking ? (
@@ -345,13 +378,14 @@ export default function DashboardPage() {
       ) : (
         <>
           {localError && <p style={{ color: 'red' }}>{localError}</p>}
-
           <h1>Dashboard - Extended UI</h1>
           <AlgorithmSelector />
 
           <p>
             Current Energy: {displayedEnergy} / {energyData ? energyData.maxEnergy : 'N/A'}
           </p>
+
+          <DailyDungeonsPanel />
 
           <div style={{ margin: '10px 0' }}>
             <button onClick={() => setAutoPlay(!autoPlay)}>
@@ -360,12 +394,14 @@ export default function DashboardPage() {
           </div>
 
           <button onClick={handleFetchDungeon}>Fetch Dungeon State</button>
-          <button onClick={refreshDungeonAndEnergy} style={{ marginLeft: 8 }}>
-            Refresh Dungeon &amp; Energy
+          <button onClick={refreshAll} style={{ marginLeft: 8 }}>
+            Refresh All
           </button>
 
-          {/* ~~~~ Render the current run if present ~~~~ */}
           {dungeonState ? (
+            // ------------------------------------
+            // Active run: show run details
+            // ------------------------------------
             <section style={{ marginTop: 20 }}>
               <DungeonRoomInfo entity={dungeonState.entity} />
 
@@ -405,34 +441,62 @@ export default function DashboardPage() {
               )}
             </section>
           ) : (
+            // ------------------------------------
+            // No active run: show minimal start-run buttons
+            // ------------------------------------
             <section style={{ marginTop: 20 }}>
               <h2>No Active Run</h2>
-              <p>No dungeon in progress. Start one below:</p>
-              <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-                <button onClick={() => handleStartRun(1)}>Start Normal (ID=1)</button>
-                <button onClick={() => handleStartRun(2)}>Start Giga (ID=2)</button>
-                <button onClick={() => handleStartRun(3)}>Start Underhaul (ID=3)</button>
-                <button
-                  onClick={() => handleStartRun(1, true)}
-                  disabled={!energyData?.isPlayerJuiced}
-                >
-                  Start Juiced Normal (ID=1)
-                </button>
-                <button
-                  onClick={() => handleStartRun(2, true)}
-                  disabled={!energyData?.isPlayerJuiced}
-                >
-                  Start Juiced Giga (ID=2)
-                </button>
-                <button
-                  onClick={() => handleStartRun(3, true)}
-                  disabled={!energyData?.isPlayerJuiced}
-                >
-                  Start Juiced Underhaul (ID=3)
-                </button>
-              </div>
+              <p>Pick a dungeon to start a run.</p>
+
+              {Object.entries(todayDungeonsMap).map(([key, data]) => {
+                const dungeonId = parseInt(key, 10)
+                const runsUsed = dayProgressMap[dungeonId] || 0
+
+                // For normal run
+                const normalMax = data.UINT256_CID
+                const normalCost = data.ENERGY_CID
+                const canRunNormal = runsUsed < normalMax && currentEnergyInt >= normalCost
+
+                // For juiced run
+                const juicedMax = data.juicedMaxRunsPerDay
+                const juicedCost = data.ENERGY_CID * 3
+                const runsUsedJuiced = runsUsed < juicedMax
+                const canRunJuiced =
+                  isPlayerJuiced && runsUsedJuiced && currentEnergyInt >= juicedCost
+
+                return (
+                  <div key={dungeonId} style={{ margin: '8px 0' }}>
+                    <div>
+                      <strong>
+                        {data.NAME_CID} (ID={dungeonId}) | Runs: {runsUsed} /{' '}
+                        {isPlayerJuiced ? juicedMax : normalMax}
+                      </strong>
+                    </div>
+                    {/* Normal Button */}
+                    <button
+                      disabled={!canRunNormal}
+                      style={{ marginRight: 6, color: canRunNormal ? 'inherit' : 'red' }}
+                      onClick={() => handleStartRun(dungeonId, false)}
+                    >
+                      Start Normal ({normalCost} energy)
+                    </button>
+
+                    {/* Juiced Button */}
+                    {isPlayerJuiced && (
+                      <button
+                        disabled={!canRunJuiced}
+                        style={{ color: canRunJuiced ? 'inherit' : 'red' }}
+                        onClick={() => handleStartRun(dungeonId, true)}
+                      >
+                        Start Juiced ({juicedCost} energy)
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
             </section>
           )}
+
           <AggregatedChangesPanel changes={balanceChangesHistory} />
           <BattleLogsPanel logs={battleHistory} />
         </>
@@ -441,9 +505,9 @@ export default function DashboardPage() {
   )
 }
 
-/**
- * Displays the current dungeon room/floor.
- */
+// ------------------------------------------------
+// Helper sub-components
+// ------------------------------------------------
 function DungeonRoomInfo({ entity }: { entity: DungeonData['entity'] }) {
   if (!entity) return null
   const roomNum = entity.ROOM_NUM_CID
@@ -460,9 +524,6 @@ function DungeonRoomInfo({ entity }: { entity: DungeonData['entity'] }) {
   )
 }
 
-/**
- * Show each player's HP/Shields, rock/paper/scissor details, last move, etc.
- */
 function PlayerStatsPanel({ title, player }: { title: string; player?: any }) {
   if (!player) {
     return (
@@ -472,7 +533,6 @@ function PlayerStatsPanel({ title, player }: { title: string; player?: any }) {
       </div>
     )
   }
-
   const hp = player.health?.current ?? 0
   const maxHP = player.health?.currentMax ?? 0
   const shield = player.shield?.current ?? 0
@@ -487,7 +547,6 @@ function PlayerStatsPanel({ title, player }: { title: string; player?: any }) {
       <p>
         Armor: {shield} / {maxShield}
       </p>
-
       <p>
         Rock — Charges: {player.rock?.currentCharges ?? 0}, ATK: {player.rock?.currentATK ?? 0},
         DEF: {player.rock?.currentDEF ?? 0}
@@ -500,19 +559,13 @@ function PlayerStatsPanel({ title, player }: { title: string; player?: any }) {
         Scissor — Charges: {player.scissor?.currentCharges ?? 0}, ATK:{' '}
         {player.scissor?.currentATK ?? 0}, DEF: {player.scissor?.currentDEF ?? 0}
       </p>
-
       <p>Last Move: {player.lastMove || 'None'}</p>
     </div>
   )
 }
 
-/**
- * By placing this panel outside the `dungeonState ? ... : ...` block,
- * we keep logs visible even after a run ends and the server returns null for dungeonState.
- */
 function BattleLogsPanel({ logs }: { logs: StepLog[] }) {
   if (!logs.length) return null
-
   return (
     <div style={{ marginTop: 20 }}>
       <h3>Battle History</h3>
@@ -548,19 +601,11 @@ function LootOptionsPanel({
       <h3>Available Loot</h3>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
         {lootOptions.map((loot, index) => (
-          <div
-            key={loot.docId || index}
-            style={{
-              border: '1px solid #ccc',
-              padding: '10px',
-              width: '220px',
-              borderRadius: 6,
-            }}
-          >
+          <div key={loot.docId || index} style={{ padding: '10px', border: '1px solid #ccc' }}>
             <p>Rarity: {loot.RARITY_CID}</p>
             <p>Boon Type: {loot.boonTypeString}</p>
-            <p>Selected Val1: {loot.selectedVal1}</p>
-            <p>Selected Val2: {loot.selectedVal2}</p>
+            <p>Val1: {loot.selectedVal1}</p>
+            <p>Val2: {loot.selectedVal2}</p>
             <button onClick={() => onPickLoot(`loot_${index + 1}` as GigaverseActionType)}>
               Pick Loot {index + 1}
             </button>

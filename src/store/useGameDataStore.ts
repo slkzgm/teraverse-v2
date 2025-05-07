@@ -1,27 +1,38 @@
-// path: src/store/useGameDataStore.tsx
+// path: src/store/useGameDataStore.ts
 'use client'
 
 import { create } from 'zustand'
-import { getOffchainStaticAction } from '@/actions/gigaverseActions'
+import { getOffchainStaticAction, getDungeonTodayAction } from '@/actions/gigaverseActions'
 import type {
   EnemyEntity,
-  OffchainGameItemEntity,
   OffchainConstants,
+  OffchainGameItemEntity,
   RecipeEntity,
   CheckpointEntity,
+  TodayDungeonDataEntity,
 } from '@slkzgm/gigaverse-sdk'
 
 /**
- * Helper function to build a lookup map where each key is an item ID_CID
- * and the value is the corresponding item entity.
- * This allows quick O(1) access by ID_CID.
+ * Build item map for quick ID_CID lookups.
  */
 function buildItemMap(items: OffchainGameItemEntity[]): Record<number, OffchainGameItemEntity> {
   const map: Record<number, OffchainGameItemEntity> = {}
   for (const item of items) {
-    // Ensure item has an ID_CID before storing
     map[item.ID_CID] = item
   }
+  return map
+}
+
+/**
+ * Build "today dungeons" map for quickly referencing daily info (e.g. cost, max runs).
+ */
+function buildTodayDungeonMap(
+  arr: TodayDungeonDataEntity[]
+): Record<number, TodayDungeonDataEntity> {
+  const map: Record<number, TodayDungeonDataEntity> = {}
+  arr.forEach((d) => {
+    map[d.ID_CID] = d
+  })
   return map
 }
 
@@ -33,17 +44,30 @@ interface GameDataState {
   constants: OffchainConstants | null
 
   /**
-   * itemsMap provides a direct ID_CID => OffchainGameItemEntity mapping for quick lookup.
+   * A map of item ID_CID => item details, for O(1) lookups in the UI.
    */
   itemsMap: Record<number, OffchainGameItemEntity>
+
+  /**
+   * A map of dungeon ID => today's daily info (energy cost, daily max runs, etc.).
+   * This data is relatively static for the day, but can be fetched on refresh or on mount.
+   */
+  todayDungeonsMap: Record<number, TodayDungeonDataEntity>
 
   isLoading: boolean
   error: string | null
 
   /**
-   * Loads offchain static data (enemies, game items, recipes, checkpoints, constants) via a single endpoint.
+   * Load standard offchain static data in one call (enemies, items, etc.).
    */
   loadOffchainStatic: (token: string) => Promise<void>
+
+  /**
+   * Load the 'dungeon today' data from the same endpoint used by getDungeonTodayAction,
+   * then store only the "dungeonDataEntities" portion in todayDungeonsMap.
+   * Typically you'd call this at the same time you update dayProgress in useGigaverseStore.
+   */
+  loadTodayDungeonData: (token: string) => Promise<void>
 }
 
 export const useGameDataStore = create<GameDataState>((set) => ({
@@ -52,17 +76,18 @@ export const useGameDataStore = create<GameDataState>((set) => ({
   recipes: [],
   checkpoints: [],
   constants: null,
+
   itemsMap: {},
+  todayDungeonsMap: {},
 
   isLoading: false,
   error: null,
 
   async loadOffchainStatic(token) {
-    console.log('[useGameDataStore] Loading offchain static data via server action...')
+    console.log('[useGameDataStore] loadOffchainStatic => calling getOffchainStaticAction...')
     set({ isLoading: true, error: null })
     try {
       const resp = await getOffchainStaticAction(token)
-
       set({
         enemies: resp.enemies,
         gameItems: resp.gameItems,
@@ -77,6 +102,28 @@ export const useGameDataStore = create<GameDataState>((set) => ({
       set({
         isLoading: false,
         error: err instanceof Error ? err.message : 'Failed to load offchain data.',
+      })
+    }
+  },
+
+  async loadTodayDungeonData(token) {
+    console.log('[useGameDataStore] loadTodayDungeonData => calling getDungeonTodayAction...')
+    set({ isLoading: true, error: null })
+    try {
+      const resp = await getDungeonTodayAction(token)
+      const map = buildTodayDungeonMap(resp.dungeonDataEntities)
+      set({
+        todayDungeonsMap: map,
+        isLoading: false,
+      })
+    } catch (err) {
+      console.error('[useGameDataStore] loadTodayDungeonData error:', err)
+      set({
+        isLoading: false,
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Failed to load dungeon daily data (todayDungeonsMap).',
       })
     }
   },

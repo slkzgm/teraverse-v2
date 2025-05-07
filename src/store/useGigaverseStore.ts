@@ -4,36 +4,56 @@
 import { create } from 'zustand'
 import { DungeonData } from '@slkzgm/gigaverse-sdk'
 import type { EnergyParsedData } from '@slkzgm/gigaverse-sdk/dist/client/types/responses'
-import { getEnergyAction } from '@/actions/gigaverseActions'
+import { getEnergyAction, getDungeonTodayAction } from '@/actions/gigaverseActions'
+
+/**
+ * Simple structure for mapping: dungeonId => daily runs used.
+ * E.g. { 1: 2, 2: 5, ... }
+ */
+type DayProgressMap = Record<number, number>
 
 interface GigaverseState {
-  // User & dungeon
+  // ------------------------------------------------------------------
+  // Core user/dungeon data
+  // ------------------------------------------------------------------
   address: string | null
   username: string | null
   noobId: string | null
   actionToken: string | number | null
   dungeonState: DungeonData | null
 
-  // Energy data (in 1e9)
+  // ------------------------------------------------------------------
+  // Energy data & scheduling
+  // ------------------------------------------------------------------
   energyData: EnergyParsedData | null
   energyTimerId: number | null
 
-  // Basic setters
+  // ------------------------------------------------------------------
+  // Day progress: how many runs used for each dungeon, reset daily
+  // ------------------------------------------------------------------
+  dayProgressMap: DayProgressMap
+
+  // ------------------------------------------------------------------
+  // Methods: auth, day progress, dungeon, etc.
+  // ------------------------------------------------------------------
   setUserData: (address: string, username: string, noobId: string) => void
   setActionToken: (token: string | number) => void
   setDungeonState: (d: DungeonData | null) => void
   clearUserData: () => void
 
-  // Main energy logic
   loadEnergy: (token: string) => Promise<void>
   stopEnergyTimer: () => void
   scheduleBoundaryFetch: (token: string) => void
+
+  loadDayProgress: (token: string) => Promise<void>
+
+  incrementRunCount: (dungeonId: number, incrementValue: number) => void
 }
 
 export const useGigaverseStore = create<GigaverseState>((set, get) => ({
-  // ------------------------------------------------
+  // ------------------------------------------------------------------
   // Initial state
-  // ------------------------------------------------
+  // ------------------------------------------------------------------
   address: null,
   username: null,
   noobId: null,
@@ -43,9 +63,11 @@ export const useGigaverseStore = create<GigaverseState>((set, get) => ({
   energyData: null,
   energyTimerId: null,
 
-  // ------------------------------------------------
-  // Auth / user
-  // ------------------------------------------------
+  dayProgressMap: {},
+
+  // ------------------------------------------------------------------
+  // Basic setters
+  // ------------------------------------------------------------------
   setUserData: (address, username, noobId) => {
     console.log('[useGigaverseStore] Setting user data.')
     set({ address, username, noobId })
@@ -62,7 +84,7 @@ export const useGigaverseStore = create<GigaverseState>((set, get) => ({
   },
 
   clearUserData: () => {
-    console.log('[useGigaverseStore] Clearing user data + dungeon + energy.')
+    console.log('[useGigaverseStore] Clearing user data + dungeon + energy + dayProgress.')
     set({
       address: null,
       username: null,
@@ -71,12 +93,13 @@ export const useGigaverseStore = create<GigaverseState>((set, get) => ({
       dungeonState: null,
       energyData: null,
       energyTimerId: null,
+      dayProgressMap: {},
     })
   },
 
-  // ------------------------------------------------
+  // ------------------------------------------------------------------
   // Energy logic
-  // ------------------------------------------------
+  // ------------------------------------------------------------------
   async loadEnergy(token) {
     console.log('[useGigaverseStore] loadEnergy => calling getEnergyAction...')
     try {
@@ -86,7 +109,6 @@ export const useGigaverseStore = create<GigaverseState>((set, get) => ({
         return
       }
 
-      // 1) Fetch from server
       const response = await getEnergyAction(token, address)
       console.log('[useGigaverseStore] getEnergyAction response:', response)
 
@@ -94,10 +116,9 @@ export const useGigaverseStore = create<GigaverseState>((set, get) => ({
       if (!e?.parsedData) {
         throw new Error(response.message || 'Failed to fetch energy.')
       }
-      // 2) Store the entire object
       set({ energyData: e.parsedData })
 
-      // 3) Now that we have an updated "energy", schedule next boundary
+      // schedule next boundary
       get().scheduleBoundaryFetch(token)
     } catch (err) {
       console.error('[useGigaverseStore] loadEnergy error =>', err)
@@ -113,20 +134,13 @@ export const useGigaverseStore = create<GigaverseState>((set, get) => ({
     }
   },
 
-  /**
-   * scheduleBoundaryFetch: sets a timer to call loadEnergy(...) right when the next integer boundary in 1e9 is reached.
-   * For example, if "energy"=351102777524, the next boundary is 352000000000 => the difference is ~897222476
-   * We'll compute how many seconds until that boundary, then do a setTimeout that calls loadEnergy again.
-   * (So we re-fetch from the server exactly when the displayed energyValue should increment by +1).
-   */
   scheduleBoundaryFetch(token) {
     console.log('[useGigaverseStore] scheduleBoundaryFetch called.')
-    // First, clear any old timer
     get().stopEnergyTimer()
 
     const ed = get().energyData
     if (!ed) {
-      console.log('[useGigaverseStore] No energyData => cannot schedule.')
+      console.log('[useGigaverseStore] No energyData => cannot schedule boundary.')
       return
     }
 
@@ -136,26 +150,19 @@ export const useGigaverseStore = create<GigaverseState>((set, get) => ({
       return
     }
 
-    // 1) Compute current integer boundary
-    // if energy=351102777524 => floor(energy/1e9)=351 => next boundary => (351+1)*1e9=352000000000
     const currentInteger = Math.floor(energy / 1_000_000_000)
     const nextBoundary = (currentInteger + 1) * 1_000_000_000
-
     const diff = nextBoundary - energy
     if (diff <= 0) {
-      // means we are already at or above next boundary
-      console.warn('[useGigaverseStore] next boundary is <=0, skipping timer.')
+      console.warn('[useGigaverseStore] next boundary <=0, skipping timer.')
       return
     }
-
     if (regenPerSecond <= 0) {
       console.warn('[useGigaverseStore] regenPerSecond=0 => skipping boundary fetch.')
       return
     }
 
-    // 2) time to wait in seconds
     const timeToWaitSec = diff / regenPerSecond
-    // clamp if needed
     let timeToWaitMs = timeToWaitSec * 1000
     if (timeToWaitMs < 100) {
       timeToWaitMs = 100
@@ -165,12 +172,40 @@ export const useGigaverseStore = create<GigaverseState>((set, get) => ({
       `[useGigaverseStore] scheduleBoundaryFetch => currentEnergy=${energy}, next=${nextBoundary}, diff=${diff}, regen=${regenPerSecond}, timeToWait=${timeToWaitMs}ms`
     )
 
-    // 3) setTimeout => calls loadEnergy again at that boundary
     const timerId = window.setTimeout(() => {
       console.log('[useGigaverseStore] boundary reached => calling loadEnergy for fresh data.')
       get().loadEnergy(token)
     }, timeToWaitMs)
 
     set({ energyTimerId: timerId })
+  },
+
+  // ------------------------------------------------------------------
+  // DayProgress logic
+  // ------------------------------------------------------------------
+  async loadDayProgress(token) {
+    console.log('[useGigaverseStore] loadDayProgress => calling getDungeonTodayAction...')
+    try {
+      const resp = await getDungeonTodayAction(token)
+
+      const map: DayProgressMap = {}
+      resp.dayProgressEntities.forEach((entry) => {
+        const dungeonId = parseInt(entry.ID_CID, 10)
+        map[dungeonId] = entry.UINT256_CID
+      })
+
+      // Overwrite the entire dayProgressMap with fresh data
+      set({ dayProgressMap: map })
+    } catch (err) {
+      console.error('[useGigaverseStore] loadDayProgress error =>', err)
+    }
+  },
+
+  incrementRunCount(dungeonId, incrementValue) {
+    set((state) => {
+      const newMap = { ...state.dayProgressMap }
+      newMap[dungeonId] = (newMap[dungeonId] || 0) + incrementValue
+      return { dayProgressMap: newMap }
+    })
   },
 }))

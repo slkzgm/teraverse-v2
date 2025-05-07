@@ -51,6 +51,8 @@ export async function validateTokenAction(token: string): Promise<{
     }
 
     const client = createClient(token)
+
+    // 1) Verify basic user existence
     const userData: GetUserMeResponse = await client.getUserMe()
     if (!userData || !userData.address) {
       return {
@@ -59,7 +61,6 @@ export async function validateTokenAction(token: string): Promise<{
         error: 'getUserMe() returned no address',
       }
     }
-
     if (!userData.canEnterGame) {
       return {
         success: false,
@@ -70,27 +71,32 @@ export async function validateTokenAction(token: string): Promise<{
       }
     }
 
+    // 2) Call getAccount(address) to retrieve the user's noob + usernames, etc.
     let username = ''
     let noobId = ''
     try {
-      const names = await client.getUsernames(userData.address)
-      if (names?.entities?.length) {
-        username = names.entities[0].NAME_CID
+      const accountResp = await client.getAccount(userData.address)
+
+      // Pull first username if available
+      if (accountResp.usernames?.length) {
+        username = accountResp.usernames[0].NAME_CID
       }
-      const noobs = await client.getNoobs(userData.address)
-      if (noobs?.entities?.length) {
-        noobId = noobs.entities[0].docId
+
+      // Check if a noob is present
+      if (accountResp.noob) {
+        noobId = accountResp.noob.docId
       } else {
+        // Means user does not have a noob => cannot play
         return {
           success: false,
           address: userData.address,
           canEnterGame: false,
           message: 'No noob found. Acquire one first.',
-          error: 'User has no noobs in their wallet',
+          error: 'User has no noobs in their account',
         }
       }
     } catch (fetchErr) {
-      console.warn('[validateTokenAction] Could not fetch user data:', fetchErr)
+      console.warn('[validateTokenAction] Could not fetch account data:', fetchErr)
       return {
         success: true,
         address: userData.address,
@@ -98,7 +104,7 @@ export async function validateTokenAction(token: string): Promise<{
         noobId: '',
         canEnterGame: true,
         message: 'Some user data not fetched, but user can access.',
-        error: 'Failed to fetch user details',
+        error: 'Failed to fetch user details (getAccount)',
       }
     }
 
@@ -309,24 +315,6 @@ export async function playMove(
       error: err instanceof Error ? err.message : 'Unknown error occurred',
     }
   }
-}
-
-/**
- * Fetch all enemies
- */
-export async function getAllEnemiesAction(token: string): Promise<GetAllEnemiesResponse> {
-  console.log('[getAllEnemiesAction] Fetching all enemies...')
-  const client = createClient(token)
-  return client.getAllEnemies()
-}
-
-/**
- * Fetch all items
- */
-export async function getAllGameItemsAction(token: string): Promise<GetAllGameItemsResponse> {
-  console.log('[getAllGameItemsAction] Fetching all game items...')
-  const client = createClient(token)
-  return client.getAllGameItems()
 }
 
 /**

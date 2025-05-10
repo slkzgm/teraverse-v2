@@ -1,21 +1,24 @@
-// path: src/app/page.tsx
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import type React from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAccount, useSignMessage } from 'wagmi'
 import { useAuthStore } from '@/store/useAuthStore'
 import { useGigaverseStore } from '@/store/useGigaverseStore'
 import { validateTokenAction, authenticateWithSignature } from '@/actions/gigaverseActions'
 import { useLoginWithAbstract } from '@abstract-foundation/agw-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Wallet, Key, AlertCircle, Loader2 } from 'lucide-react'
 
 export default function HomePage() {
   const router = useRouter()
   const { hasHydrated, bearerToken, expiresAt, setAuthData } = useAuthStore()
-  const { setUserData, clearUserData } = useGigaverseStore()
+  const { setUserData } = useGigaverseStore()
   const { isConnected, address } = useAccount()
   const { signMessageAsync } = useSignMessage()
-  const { login } = useLoginWithAbstract()
+  const { login, logout } = useLoginWithAbstract()
 
   // Redirect to dashboard if token is still valid
   useEffect(() => {
@@ -90,38 +93,106 @@ export default function HomePage() {
     }
   }
 
-  // Clear stored authentication
+  // Clear stored authentication and disconnect wallet if connected
   function handleDisconnect() {
-    clearUserData()
-    setAuthData('', 0)
+    if (isConnected) {
+      logout()
+    }
     setAuthTokenInput('')
     setError('')
   }
 
   return (
-    <main style={{ padding: 20 }}>
-      <h1>Teraverse Login</h1>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
+      <div className="w-full max-w-md space-y-6">
+        <div className="text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary">
+            <span className="text-2xl font-bold text-primary-foreground">T</span>
+          </div>
+          <h1 className="text-3xl font-bold">Teraverse</h1>
+          <p className="mt-2 text-muted-foreground">Enhanced Gameplay for Gigaverse</p>
+        </div>
 
-      <form onSubmit={handleBearerSubmit} style={{ marginBottom: 10 }}>
-        <input
-          type="text"
-          placeholder="Bearer token..."
-          value={authTokenInput}
-          onChange={(e) => setAuthTokenInput(e.target.value)}
-          disabled={isLoading}
-        />
-        <button type="submit" disabled={isLoading}>
-          {isLoading ? 'Verifying...' : 'Connect with Token'}
-        </button>
-      </form>
+        {error && (
+          <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+            <AlertCircle className="h-4 w-4" />
+            {error}
+          </div>
+        )}
 
-      <button onClick={handleWalletLogin} disabled={isLoading} style={{ marginRight: 8 }}>
-        {isLoading ? 'Processing...' : !isConnected ? 'Connect Wallet' : 'Sign Message to Login'}
-      </button>
-      <button onClick={handleDisconnect} disabled={isLoading}>
-        Disconnect / Clear
-      </button>
-    </main>
+        <div className="rounded-lg border border-border bg-card p-6">
+          <form onSubmit={handleBearerSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="token" className="text-sm font-medium">
+                Bearer Token
+              </label>
+              <Input
+                id="token"
+                type="text"
+                placeholder="Enter your bearer token..."
+                value={authTokenInput}
+                onChange={(e) => setAuthTokenInput(e.target.value)}
+                disabled={isLoading}
+                className="w-full"
+              />
+            </div>
+            <Button type="submit" disabled={isLoading} className="w-full">
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Verifying...
+                </>
+              ) : (
+                <>
+                  <Key className="mr-2 h-4 w-4" />
+                  Connect with Token
+                </>
+              )}
+            </Button>
+          </form>
+
+          <div className="my-4 flex items-center">
+            <div className="flex-1 border-t border-border"></div>
+            <span className="mx-2 text-xs text-muted-foreground">OR</span>
+            <div className="flex-1 border-t border-border"></div>
+          </div>
+
+          <Button
+            variant="outline"
+            onClick={handleWalletLogin}
+            disabled={isLoading}
+            className="w-full"
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Processing...
+              </>
+            ) : !isConnected ? (
+              <>
+                <Wallet className="mr-2 h-4 w-4" />
+                Connect Wallet
+              </>
+            ) : (
+              <>
+                <Wallet className="mr-2 h-4 w-4" />
+                Sign Message to Login
+              </>
+            )}
+          </Button>
+
+          {isConnected && (
+            <Button
+              variant="ghost"
+              onClick={handleDisconnect}
+              disabled={isLoading}
+              className="mt-2 w-full text-muted-foreground"
+            >
+              Disconnect Wallet
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }

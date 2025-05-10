@@ -1,5 +1,8 @@
-import type React from 'react'
+// path: src/app/(dashboard)/layout.tsx
+'use client'
+
 import { AuthGuard } from '@/components/auth-guard'
+import React from 'react'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (

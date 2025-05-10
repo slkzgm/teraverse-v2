@@ -20,9 +20,6 @@ function createClient(token: string) {
   return new GameClient('https://gigaverse.io', token)
 }
 
-/**
- * Validate token by calling getUserMe and optionally fetch username/noobId
- */
 export async function validateTokenAction(token: string): Promise<{
   success: boolean
   address?: string
@@ -32,7 +29,6 @@ export async function validateTokenAction(token: string): Promise<{
   message?: string
   error?: string
 }> {
-  console.log('[validateTokenAction] Validating token...')
   try {
     if (!token || token.trim() === '') {
       return {
@@ -43,8 +39,6 @@ export async function validateTokenAction(token: string): Promise<{
     }
 
     const client = createClient(token)
-
-    // 1) Verify basic user existence
     const userData: GetUserMeResponse = await client.getUserMe()
     if (!userData || !userData.address) {
       return {
@@ -63,22 +57,17 @@ export async function validateTokenAction(token: string): Promise<{
       }
     }
 
-    // 2) Call getAccount(address) to retrieve the user's noob + usernames, etc.
     let username = ''
     let noobId = ''
+
     try {
       const accountResp = await client.getAccount(userData.address)
-
-      // Pull first username if available
       if (accountResp.usernames?.length) {
         username = accountResp.usernames[0].NAME_CID
       }
-
-      // Check if a noob is present
       if (accountResp.noob) {
         noobId = accountResp.noob.docId
       } else {
-        // Means user does not have a noob => cannot play
         return {
           success: false,
           address: userData.address,
@@ -88,7 +77,7 @@ export async function validateTokenAction(token: string): Promise<{
         }
       }
     } catch (fetchErr) {
-      console.warn('[validateTokenAction] Could not fetch account data:', fetchErr)
+      // We can allow partial success here
       return {
         success: true,
         address: userData.address,
@@ -96,7 +85,7 @@ export async function validateTokenAction(token: string): Promise<{
         noobId: '',
         canEnterGame: true,
         message: 'Some user data not fetched, but user can access.',
-        error: 'Failed to fetch user details (getAccount)',
+        error: `Failed to fetch user details (getAccount): ${JSON.stringify(fetchErr)}`,
       }
     }
 
@@ -118,9 +107,6 @@ export async function validateTokenAction(token: string): Promise<{
   }
 }
 
-/**
- * Wallet-based auth
- */
 export async function authenticateWithSignature(
   walletAddress: string,
   signature: string,
@@ -133,7 +119,6 @@ export async function authenticateWithSignature(
   message?: string
   error?: string
 }> {
-  console.log('[authenticateWithSignature] Authenticating signature...')
   try {
     const response = await fetch('https://gigaverse.io/api/user/auth', {
       method: 'POST',
@@ -170,27 +155,22 @@ export async function authenticateWithSignature(
   }
 }
 
-/**
- * Fetch dungeon state
- */
 export async function fetchDungeonStateAction(token: string): Promise<{
   success: boolean
   data: DungeonData | null
   message?: string
   error?: string
 }> {
-  console.log('[fetchDungeonState] Fetching dungeon state...')
   try {
     const client = createClient(token)
     const { data } = await client.fetchDungeonState()
-
     return {
       success: true,
       data,
       message: 'Dungeon state fetched',
     }
   } catch (err: unknown) {
-    console.error('[fetchDungeonState] Error:', err)
+    console.error('[fetchDungeonStateAction] Error:', err)
     return {
       success: false,
       data: null,
@@ -200,9 +180,6 @@ export async function fetchDungeonStateAction(token: string): Promise<{
   }
 }
 
-/**
- * Start a run. This consumes energy on the server side depending on the mode.
- */
 export async function startRunAction(
   token: string,
   actionToken = '',
@@ -215,7 +192,6 @@ export async function startRunAction(
   message?: string
   error?: string
 }> {
-  console.log('[startRunAction] Starting run, dungeonId:', dungeonId)
   try {
     const client = createClient(token)
     const payload: StartRunPayload = {
@@ -238,7 +214,6 @@ export async function startRunAction(
         error: 'Server responded with success=false',
       }
     }
-
     return {
       success: true,
       data: (result.data as DungeonData) || null,
@@ -256,9 +231,6 @@ export async function startRunAction(
   }
 }
 
-/**
- * Play a move in the currently active run
- */
 export async function playMoveAction(
   token: string,
   actionToken: string | null,
@@ -274,7 +246,6 @@ export async function playMoveAction(
 }> {
   try {
     const client = createClient(token)
-    console.log('[playMove] Attempting move:', move)
     const {
       actionToken: newActionToken,
       data,
@@ -288,7 +259,7 @@ export async function playMoveAction(
         index: 0,
         gearInstanceIds: [],
       },
-      dungeonId: dungeonId,
+      dungeonId,
     })
 
     return {
@@ -299,7 +270,7 @@ export async function playMoveAction(
       gameItemBalanceChanges: gameItemBalanceChanges ?? null,
     }
   } catch (err: unknown) {
-    console.error('[playMove] Error:', err)
+    console.error('[playMoveAction] Error:', err)
     return {
       success: false,
       data: null,
@@ -309,30 +280,17 @@ export async function playMoveAction(
   }
 }
 
-/**
- * Fetch energy
- */
 export async function getEnergyAction(token: string, address: string): Promise<GetEnergyResponse> {
-  console.log('[getEnergyAction] Fetching energy data...')
   const client = createClient(token)
   return client.getEnergy(address)
 }
 
-/**
- * Fetches offchain static data (enemies, recipes, game items, checkpoints, constants) from a single endpoint.
- */
 export async function getOffchainStaticAction(token: string): Promise<GetOffchainStaticResponse> {
-  console.log('[getOffchainStaticAction] Requesting offchain static data from server...')
   const client = createClient(token)
   return client.getOffchainStatic()
 }
 
-/**
- * Fetches today's dungeon progress, including day-progress data (number of runs used)
- * and today's dungeon metadata (energy cost, max runs, etc.).
- */
 export async function getDungeonTodayAction(token: string): Promise<GetDungeonTodayResponse> {
-  console.log('[getDungeonTodayAction] Requesting /api/game/dungeon/today...')
   const client = createClient(token)
   return client.getDungeonToday()
 }

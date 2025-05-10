@@ -1,5 +1,5 @@
 // path: src/utils/silentLogger.ts
-import { CustomLogger } from '@slkzgm/gigaverse-engine' // or wherever CustomLogger is
+import { CustomLogger } from '@slkzgm/gigaverse-engine'
 
 export const silentLogger: CustomLogger = {
   info: () => {},

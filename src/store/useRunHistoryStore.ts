@@ -4,9 +4,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-/**
- * Describes a single run recap that we'll store locally.
- */
 export interface RunRecapEntry {
   address: string
   username: string
@@ -30,11 +27,10 @@ export const useRunHistoryStore = create<RunHistoryState>()(
     (set) => ({
       runs: [],
       addRun: (recap) => set((state) => ({ runs: [...state.runs, recap] })),
-
       clearRuns: () => set({ runs: [] }),
     }),
     {
-      name: 'run-history-storage', // key in localStorage
+      name: 'run-history-storage',
     }
   )
 )

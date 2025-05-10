@@ -1,5 +1,8 @@
+// path: src/app/(dashboard)/_components/dashboard-header.tsx
 'use client'
 
+import React from 'react'
+import Image from 'next/image'
 import { useAuthStore } from '@/store/useAuthStore'
 import { useGigaverseStore } from '@/store/useGigaverseStore'
 import { Button } from '@/components/ui/button'
@@ -26,15 +29,32 @@ export function DashboardHeader() {
   return (
     <div className="mb-6 flex items-center justify-between">
       <div className="flex items-center gap-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
-          <span className="font-bold text-primary-foreground">T</span>
+        <div className="relative h-8 w-8">
+          <Image src="/images/logo.png" alt="Teraverse Logo" fill className="object-contain" />
         </div>
-        <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Teraverse</h1>
+        <div className="flex items-center">
+          <h1 className="bg-gradient-to-r from-primary to-primary/70 bg-clip-text font-title text-2xl font-bold tracking-wider text-transparent">
+            TERAVERSE
+          </h1>
+          <div className="ml-2 hidden h-8 items-center sm:flex">
+            <div className="mx-2 h-5 border-l border-border" />
+            <span className="text-sm text-muted-foreground">
+              by{' '}
+              <a
+                href="https://github.com/slkzgm"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:underline"
+              >
+                <span className="font-semibold text-primary">SLK</span>
+              </a>
+            </span>
+          </div>
+        </div>
       </div>
 
       <div className="flex items-center gap-3">
         <ThemeSwitcher />
-
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" className="gap-2">

@@ -1,5 +1,6 @@
-// path: src/app/dashboard/components/dungeon-list.tsx
+// path: src/app/(dashboard)/_components/dungeon-list.tsx
 'use client'
+
 import { Button } from '@/components/ui/button'
 import type { TodayDungeonDataEntity } from '@slkzgm/gigaverse-sdk'
 import { Flame, Zap } from 'lucide-react'
@@ -33,7 +34,7 @@ export function DungeonList({
       <h2 className="mb-3 text-lg font-semibold">Available Dungeons</h2>
       <div className="space-y-3">
         {Object.entries(dungeons).map(([key, data]) => {
-          const dungeonId = Number.parseInt(key, 10)
+          const dungeonId = Number(key)
           const runsUsed = dayProgressMap[dungeonId] || 0
 
           const normalCost = data.ENERGY_CID
@@ -41,14 +42,9 @@ export function DungeonList({
 
           const normalMax = data.UINT256_CID
           const juicedMax = data.juicedMaxRunsPerDay
-
-          // if juiced, you get up to juicedMax runs; otherwise up to normalMax
           const effectiveMax = isPlayerJuiced ? juicedMax : normalMax
 
-          // normal run consumes 1 run
           const canRunNormal = runsUsed < effectiveMax && currentEnergy >= normalCost
-
-          // juiced run consumes 3 runs at once, must not exceed juicedMax
           const canRunJuiced =
             isPlayerJuiced && runsUsed + 3 <= juicedMax && currentEnergy >= juicedCost
 

@@ -1,4 +1,6 @@
+// path: src/app/(dashboard)/_components/run-history-panel.tsx
 'use client'
+
 import { useRunHistoryStore } from '@/store/useRunHistoryStore'
 import { Button } from '@/components/ui/button'
 import { Trash2, History, Flame } from 'lucide-react'
@@ -20,7 +22,6 @@ export function RunHistoryPanel() {
     )
   }
 
-  // Sort runs by timestamp in descending order (newest first)
   const sortedRuns = [...runs].sort((a, b) => b.timestamp - a.timestamp)
 
   return (

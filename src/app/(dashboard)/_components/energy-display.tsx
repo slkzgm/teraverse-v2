@@ -1,4 +1,4 @@
-// path: src/app/dashboard/components/energy-display.tsx
+// path: src/app/(dashboard)/_components/energy-display.tsx
 import { Battery, BatteryCharging } from 'lucide-react'
 import type { EnergyParsedData } from '@slkzgm/gigaverse-sdk'
 
@@ -20,7 +20,6 @@ export function EnergyDisplay({ energyData }: EnergyDisplayProps) {
   const maxEnergy = energyData.maxEnergy
   const percentage = Math.min(100, Math.round((currentEnergy / maxEnergy) * 100))
 
-  // Determine color based on percentage
   let colorClass = 'text-green-500'
   if (percentage < 30) colorClass = 'text-red-500'
   else if (percentage < 70) colorClass = 'text-amber-500'

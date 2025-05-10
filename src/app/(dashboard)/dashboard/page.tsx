@@ -1,3 +1,4 @@
+// path: src/app/(dashboard)/page.tsx
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -7,13 +8,6 @@ import { useAuthStore } from '@/store/useAuthStore'
 import { useGigaverseStore } from '@/store/useGigaverseStore'
 import { useAlgorithmStore } from '@/store/useAlgorithmStore'
 import { useGameDataStore } from '@/store/useGameDataStore'
-// Update imports to point to the new component locations
-import AlgorithmSelector from '@/app/(dashboard)/_components/algorithm-selector'
-import { RunRecapPanel } from '@/app/(dashboard)/_components/run-recap-panel'
-import { RunHistoryPanel } from '@/app/(dashboard)/_components/run-history-panel'
-import { DungeonList } from '@/app/(dashboard)/_components/dungeon-list'
-import { ActiveRunPanel } from '@/app/(dashboard)/_components/active-run-panel'
-import { EnergyDisplay } from '@/app/(dashboard)/_components/energy-display'
 import {
   buildGigaverseRunState,
   MctsAlgorithm,
@@ -25,21 +19,20 @@ import { useRunHistoryStore } from '@/store/useRunHistoryStore'
 import { Button } from '@/components/ui/button'
 import { RefreshCw, Play, Pause } from 'lucide-react'
 import { DashboardHeader } from '@/app/(dashboard)/_components/dashboard-header'
+import { EnergyDisplay } from '@/app/(dashboard)/_components/energy-display'
+import { AlgorithmSelector } from '@/app/(dashboard)/_components/algorithm-selector'
+import { ActiveRunPanel } from '@/app/(dashboard)/_components/active-run-panel'
+import { DungeonList } from '@/app/(dashboard)/_components/dungeon-list'
+import { RunRecapPanel } from '@/app/(dashboard)/_components/run-recap-panel'
+import { RunHistoryPanel } from '@/app/(dashboard)/_components/run-history-panel'
 
-// MCTS configuration
 const mctsConfig = {
   simulationsCount: 300,
   maxDepth: 2,
 }
 
-/**
- * Main dashboard page component that handles game state, algorithm selection,
- * and user interactions for the Teraverse application.
- */
 export default function DashboardPage() {
   const { bearerToken } = useAuthStore()
-
-  // Core Zustand stores
   const {
     address,
     username,
@@ -62,34 +55,26 @@ export default function DashboardPage() {
     error,
   } = useGameDataStore()
   const { selectedAlgorithm, autoPlay, setAutoPlay } = useAlgorithmStore()
+  const { addRun } = useRunHistoryStore()
 
-  // Local states
   const [localError, setLocalError] = useState('')
   const [balanceChangesHistory, setBalanceChangesHistory] = useState<GameItemBalanceChange[]>([])
   const [finalEnemiesDefeated, setFinalEnemiesDefeated] = useState(0)
-
-  // Tracking current run's dungeon name & mode (juiced/normal)
   const [currentDungeonName, setCurrentDungeonName] = useState('')
   const [currentDungeonIsJuiced, setCurrentDungeonIsJuiced] = useState(false)
+
   const currentDungeonNameRef = useRef('')
   const currentDungeonIsJuicedRef = useRef(false)
-
-  // Local run history store
-  const { addRun } = useRunHistoryStore()
-
-  // Refs for MCTS and auto-play
   const mctsRef = useRef<MctsAlgorithm | null>(null)
   const isAutoPlayingRef = useRef(false)
   const autoPlayRef = useRef(autoPlay)
 
-  // Update refs when state changes
   useEffect(() => {
     currentDungeonNameRef.current = currentDungeonName
     currentDungeonIsJuicedRef.current = currentDungeonIsJuiced
     autoPlayRef.current = autoPlay
   }, [currentDungeonName, currentDungeonIsJuiced, autoPlay])
 
-  // Initialize algorithm based on selection
   useEffect(() => {
     if (selectedAlgorithm === 'mcts') {
       mctsRef.current = new MctsAlgorithm(mctsConfig, silentLogger)
@@ -98,16 +83,11 @@ export default function DashboardPage() {
     }
   }, [selectedAlgorithm])
 
-  // Load game data on mount
   useEffect(() => {
     if (!bearerToken || !address) return
-
-    // Load static data if not already loaded
     if (enemies.length === 0 && gameItems.length === 0) {
       loadOffchainStatic(bearerToken)
     }
-
-    // Load dynamic data
     loadTodayDungeonData(bearerToken)
     loadDayProgress(bearerToken)
     loadEnergy(bearerToken)
@@ -127,17 +107,14 @@ export default function DashboardPage() {
     stopEnergyTimer,
   ])
 
-  // Fetch current dungeon state on mount
   useEffect(() => {
     if (!bearerToken) return
-
     async function fetchOnMount() {
       setLocalError('')
       const result = await callGigaverseAction(fetchDungeonStateAction, bearerToken!)
-      if (!result.success) {
-        setLocalError(result.message || 'Failed to fetch dungeon on mount.')
+      if (!result.success && result.message) {
+        setLocalError(result.message)
       } else if (result.data?.entity?.ID_CID) {
-        // If we have a dungeon, try to get its name from todayDungeonsMap
         const dungeonId = Number(result.data.entity.ID_CID)
         const dungeonName = todayDungeonsMap[dungeonId]?.NAME_CID ?? `Dungeon #${dungeonId}`
         setCurrentDungeonName(dungeonName)
@@ -146,9 +123,6 @@ export default function DashboardPage() {
     fetchOnMount()
   }, [bearerToken, todayDungeonsMap])
 
-  /**
-   * Aggregates item changes from the balance history
-   */
   const getAggregatedItemChanges = useCallback(() => {
     const map: Record<number, number> = {}
     for (const c of balanceChangesHistory) {
@@ -157,18 +131,11 @@ export default function DashboardPage() {
     return map
   }, [balanceChangesHistory])
 
-  /**
-   * Refreshes the current dungeon state
-   */
   const refreshDungeon = useCallback(async () => {
     if (!bearerToken) return
     await callGigaverseAction(fetchDungeonStateAction, bearerToken)
   }, [bearerToken])
 
-  /**
-   * Checks if the current run is over and refreshes the state
-   * @returns true if the run is over, false otherwise
-   */
   const checkRunOverAndRefresh = useCallback(async (): Promise<boolean> => {
     const ds = useGigaverseStore.getState().dungeonState
     if (!ds || !ds.run) {
@@ -179,14 +146,11 @@ export default function DashboardPage() {
     const ended = ds.run.players[0].health?.current <= 0 || !!ds.entity?.COMPLETE_CID
     if (ended) {
       setAutoPlay(false)
-
       const roomNum = ds.entity?.ROOM_NUM_CID ?? 1
       const finalEnemies = Math.max(0, roomNum - 1)
       setFinalEnemiesDefeated(finalEnemies)
 
       const itemChanges = getAggregatedItemChanges()
-
-      // Add run to history
       addRun({
         address: address!,
         username: username!,
@@ -198,16 +162,12 @@ export default function DashboardPage() {
         timestamp: Date.now(),
         itemChanges,
       })
-
       await refreshDungeon()
       return true
     }
     return false
   }, [address, username, noobId, getAggregatedItemChanges, refreshDungeon, setAutoPlay, addRun])
 
-  /**
-   * Gets the recommended move based on the selected algorithm
-   */
   const getRecommendedMove = useCallback((): GigaverseActionType | null => {
     const ds = useGigaverseStore.getState().dungeonState
     if (!ds) return null
@@ -216,15 +176,12 @@ export default function DashboardPage() {
     if (selectedAlgorithm === 'random') {
       const possible: GigaverseActionType[] = []
       if (ds.run?.lootPhase && ds.run.lootOptions?.length) {
-        // Use correct loot action types based on available options
         const lootActions = [
           GigaverseActionType.PICK_LOOT_ONE,
           GigaverseActionType.PICK_LOOT_TWO,
           GigaverseActionType.PICK_LOOT_THREE,
           GigaverseActionType.PICK_LOOT_FOUR,
         ]
-
-        // Only add available loot options
         for (let i = 0; i < Math.min(ds.run.lootOptions.length, lootActions.length); i++) {
           possible.push(lootActions[i])
         }
@@ -241,11 +198,10 @@ export default function DashboardPage() {
     if (selectedAlgorithm === 'mcts' && mctsRef.current) {
       try {
         if (!ds.run) return null
-
         const actionData = buildGigaverseRunState(ds, useGameDataStore.getState().enemies)
         return mctsRef.current.pickAction(actionData).type
       } catch (error) {
-        console.error('[getRecommendedMove] MCTS error:', error)
+        console.error('[DashboardPage] MCTS error:', error)
         return null
       }
     }
@@ -253,13 +209,9 @@ export default function DashboardPage() {
     return null
   }, [selectedAlgorithm])
 
-  /**
-   * Handles playing a move in the game
-   */
   const handlePlayMove = useCallback(
     async (move: GigaverseActionType) => {
       if (!bearerToken) return
-
       const prevDs = useGigaverseStore.getState().dungeonState
       if (!prevDs?.run) return
 
@@ -271,8 +223,6 @@ export default function DashboardPage() {
           Number(prevDs.entity?.ID_CID),
           move
         )
-
-        // Update item balance history
         if (result.gameItemBalanceChanges?.length) {
           setBalanceChangesHistory((prev) => [...prev, ...result.gameItemBalanceChanges!])
         }
@@ -283,15 +233,12 @@ export default function DashboardPage() {
     [bearerToken]
   )
 
-  /**
-   * Runs the auto-play chain, executing moves automatically
-   */
   const runAutoPlayChain = useCallback(async () => {
     if (isAutoPlayingRef.current) return
     isAutoPlayingRef.current = true
 
     try {
-      let steps = 60 // Safety limit to prevent infinite loops
+      let steps = 60
       while (autoPlayRef.current && steps > 0) {
         if (await checkRunOverAndRefresh()) break
         const move = getRecommendedMove()
@@ -308,49 +255,39 @@ export default function DashboardPage() {
     }
   }, [checkRunOverAndRefresh, getRecommendedMove, handlePlayMove])
 
-  /**
-   * Handles starting a new dungeon run
-   */
   async function handleStartRun(dungeonId: number, isJuiced: boolean) {
     if (!bearerToken) return
     setLocalError('')
+    try {
+      const { actionToken } = useGigaverseStore.getState()
+      const result = await callGigaverseAction(
+        startRunAction,
+        bearerToken,
+        actionToken || '',
+        dungeonId,
+        isJuiced
+      )
+      if (!result.success) {
+        setLocalError(result.message || 'Failed to start run.')
+        return
+      }
+      setBalanceChangesHistory([])
+      setFinalEnemiesDefeated(0)
 
-    const { actionToken } = useGigaverseStore.getState()
-    const result = await callGigaverseAction(
-      startRunAction,
-      bearerToken,
-      actionToken || '',
-      dungeonId,
-      isJuiced
-    )
-    if (!result.success) {
-      setLocalError(result.message || 'Failed to start run.')
-      return
+      const dsName = todayDungeonsMap[dungeonId]?.NAME_CID ?? `Dungeon #${dungeonId}`
+      setCurrentDungeonName(dsName)
+      setCurrentDungeonIsJuiced(isJuiced)
+      currentDungeonNameRef.current = dsName
+      currentDungeonIsJuicedRef.current = isJuiced
+
+      incrementRunCount(dungeonId, isJuiced ? 3 : 1)
+      await loadEnergy(bearerToken)
+    } catch (err) {
+      console.error('[Dashboard] handleStartRun error:', err)
+      setLocalError(err instanceof Error ? err.message : 'Unknown error starting run.')
     }
-
-    // Reset run state
-    setBalanceChangesHistory([])
-    setFinalEnemiesDefeated(0)
-
-    // Set dungeon info
-    const dsName = todayDungeonsMap[dungeonId]?.NAME_CID ?? `Dungeon #${dungeonId}`
-    setCurrentDungeonName(dsName)
-    setCurrentDungeonIsJuiced(isJuiced)
-
-    // Update refs immediately
-    currentDungeonNameRef.current = dsName
-    currentDungeonIsJuicedRef.current = isJuiced
-
-    // Update run count (normal: +1, juiced: +3)
-    incrementRunCount(dungeonId, isJuiced ? 3 : 1)
-
-    // Refresh energy
-    await loadEnergy(bearerToken)
   }
 
-  /**
-   * Refreshes all game data
-   */
   async function refreshAll() {
     if (!bearerToken) return
     setLocalError('')
@@ -367,14 +304,12 @@ export default function DashboardPage() {
     }
   }
 
-  // Start auto-play when enabled
   useEffect(() => {
     if (autoPlay && !isAutoPlayingRef.current) {
       runAutoPlayChain()
     }
   }, [autoPlay, runAutoPlayChain])
 
-  // Calculate derived values
   let currentEnergyInt = 0
   let isPlayerJuiced = false
   if (energyData) {
@@ -382,9 +317,6 @@ export default function DashboardPage() {
     isPlayerJuiced = energyData.isPlayerJuiced
   }
 
-  // =============================
-  // Render
-  // =============================
   return (
     <div className="space-y-6">
       <DashboardHeader />

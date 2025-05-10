@@ -1,14 +1,11 @@
-// path: src/app/dashboard/components/algorithm-selector.tsx
+// path: src/app/(dashboard)/_components/algorithm-selector.tsx
 'use client'
+
 import { useAlgorithmStore } from '@/store/useAlgorithmStore'
 import { Button } from '@/components/ui/button'
 import { Brain, Dices, Hand } from 'lucide-react'
 
-/**
- * A component that allows picking an algorithm (manual, mcts, random)
- * and toggling auto-play.
- */
-export default function AlgorithmSelector() {
+export function AlgorithmSelector() {
   const { selectedAlgorithm, setAlgorithm } = useAlgorithmStore()
 
   const algorithms = [

@@ -19,6 +19,12 @@ const config = {
       },
     },
     extend: {
+      // Ajout de la configuration fontFamily
+      fontFamily: {
+        sans: ['var(--font-space-grotesk)', 'system-ui', 'sans-serif'],
+        heading: ['var(--font-space-grotesk)', 'system-ui', 'sans-serif'],
+        title: ['var(--font-audiowide)', 'system-ui', 'sans-serif'], // Nouvelle police pour les titres spéciaux
+      },
       colors: {
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',

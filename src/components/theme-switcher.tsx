@@ -1,4 +1,4 @@
-// src/components/theme-switcher.tsx
+// path: src/components/theme-switcher.tsx
 'use client'
 
 import { useTheme } from 'next-themes'
@@ -16,7 +16,6 @@ export default function ThemeSwitcher() {
   const { theme, setTheme, resolvedTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
 
-  // Avoid hydration mismatch
   useEffect(() => {
     setMounted(true)
   }, [])
@@ -30,10 +29,8 @@ export default function ThemeSwitcher() {
     )
   }
 
-  // Helper function to get the current theme icon
+  const currentTheme = theme === 'system' ? resolvedTheme : theme
   const getThemeIcon = () => {
-    const currentTheme = theme === 'system' ? resolvedTheme : theme
-
     if (currentTheme === 'dark') return <Moon className="h-5 w-5" />
     if (currentTheme === 'dim') return <Sunset className="h-5 w-5" />
     return <Sun className="h-5 w-5" />
@@ -51,6 +48,7 @@ export default function ThemeSwitcher() {
           <span className="sr-only">Toggle theme</span>
         </Button>
       </DropdownMenuTrigger>
+
       <DropdownMenuContent align="end">
         <DropdownMenuItem
           onClick={() => setTheme('light')}

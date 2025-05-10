@@ -1,7 +1,8 @@
+// path: src/app/page.tsx
 'use client'
 
-import type React from 'react'
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { useAccount, useSignMessage } from 'wagmi'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -20,7 +21,10 @@ export default function HomePage() {
   const { signMessageAsync } = useSignMessage()
   const { login, logout } = useLoginWithAbstract()
 
-  // Redirect to dashboard if token is still valid
+  const [authTokenInput, setAuthTokenInput] = useState('')
+  const [error, setError] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+
   useEffect(() => {
     if (!hasHydrated) return
     if (bearerToken && expiresAt && Date.now() < expiresAt) {
@@ -28,11 +32,6 @@ export default function HomePage() {
     }
   }, [hasHydrated, bearerToken, expiresAt, router])
 
-  const [authTokenInput, setAuthTokenInput] = useState('')
-  const [error, setError] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-
-  // Handle login with bearer token
   async function handleBearerSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
@@ -44,7 +43,7 @@ export default function HomePage() {
     try {
       const result = await validateTokenAction(authTokenInput)
       if (!result.success || !result.address || !result.canEnterGame) {
-        throw new Error(result.message || 'Invalid token or cannot access game.')
+        throw new Error(result.message || 'Invalid token or no access.')
       }
       const oneHourLater = Date.now() + 60 * 60 * 1000
       setAuthData(authTokenInput, oneHourLater)
@@ -58,7 +57,6 @@ export default function HomePage() {
     }
   }
 
-  // Handle login with wallet signature
   async function handleWalletLogin() {
     setError('')
     if (!isConnected) {
@@ -79,7 +77,7 @@ export default function HomePage() {
       }
       const validation = await validateTokenAction(authResult.bearerToken)
       if (!validation.success || !validation.address || !validation.canEnterGame) {
-        throw new Error(validation.message || 'Authenticated token is invalid or no game access.')
+        throw new Error(validation.message || 'Token invalid or no game access.')
       }
       const finalExpiresAt = authResult.expiresAt ?? Date.now() + 60 * 60 * 1000
       setAuthData(authResult.bearerToken, finalExpiresAt)
@@ -93,11 +91,8 @@ export default function HomePage() {
     }
   }
 
-  // Clear stored authentication and disconnect wallet if connected
   function handleDisconnect() {
-    if (isConnected) {
-      logout()
-    }
+    if (isConnected) logout()
     setAuthTokenInput('')
     setError('')
   }
@@ -106,10 +101,18 @@ export default function HomePage() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
       <div className="w-full max-w-md space-y-6">
         <div className="text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary">
-            <span className="text-2xl font-bold text-primary-foreground">T</span>
+          <div className="relative mx-auto mb-4 h-16 w-16">
+            <Image
+              src="/images/logo.png"
+              alt="Teraverse Logo"
+              fill
+              className="object-contain"
+              priority
+            />
           </div>
-          <h1 className="text-3xl font-bold">Teraverse</h1>
+          <h1 className="bg-gradient-to-r from-primary to-primary/70 bg-clip-text font-title text-4xl font-bold tracking-wider text-transparent">
+            TERAVERSE
+          </h1>
           <p className="mt-2 text-muted-foreground">Enhanced Gameplay for Gigaverse</p>
         </div>
 
@@ -152,9 +155,9 @@ export default function HomePage() {
           </form>
 
           <div className="my-4 flex items-center">
-            <div className="flex-1 border-t border-border"></div>
+            <div className="flex-1 border-t border-border" />
             <span className="mx-2 text-xs text-muted-foreground">OR</span>
-            <div className="flex-1 border-t border-border"></div>
+            <div className="flex-1 border-t border-border" />
           </div>
 
           <Button

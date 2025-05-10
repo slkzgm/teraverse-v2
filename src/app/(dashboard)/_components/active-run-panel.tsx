@@ -1,7 +1,8 @@
+// path: src/app/(dashboard)/_components/active-run-panel.tsx
 'use client'
+
 import { Button } from '@/components/ui/button'
 import type React from 'react'
-
 import type { DungeonData, LootOption, Player } from '@slkzgm/gigaverse-sdk'
 import { GigaverseActionType } from '@slkzgm/gigaverse-engine'
 import { Shield, Heart, FileText, Scroll, Skull, Star } from 'lucide-react'
@@ -107,7 +108,9 @@ function RecommendedButton({
       )}
       <Button
         variant="outline"
-        className={`h-12 w-full flex-1 sm:h-auto ${isRecommended ? 'border-2 border-yellow-400' : ''} ${className}`}
+        className={`h-12 w-full flex-1 sm:h-auto ${
+          isRecommended ? 'border-2 border-yellow-400' : ''
+        } ${className}`}
         onClick={onClick}
       >
         {children}
@@ -137,7 +140,9 @@ function PlayerCard({ title, player }: { title: string; player?: Player }) {
 
   return (
     <div
-      className={`relative rounded-md border border-border bg-background p-3 ${isDead ? 'opacity-80' : ''}`}
+      className={`relative rounded-md border border-border bg-background p-3 ${
+        isDead ? 'opacity-80' : ''
+      }`}
     >
       {isDead && (
         <div className="absolute inset-0 z-10 flex items-center justify-center rounded-md bg-black/40">
@@ -161,10 +166,7 @@ function PlayerCard({ title, player }: { title: string; player?: Player }) {
           </span>
         </div>
         <div className="h-2 w-full overflow-hidden rounded-full bg-red-500/20">
-          <div
-            className="h-full rounded-full bg-red-500"
-            style={{ width: `${hpPercentage}%` }}
-          ></div>
+          <div className="h-full rounded-full bg-red-500" style={{ width: `${hpPercentage}%` }} />
         </div>
       </div>
 
@@ -182,7 +184,7 @@ function PlayerCard({ title, player }: { title: string; player?: Player }) {
           <div
             className="h-full rounded-full bg-blue-500"
             style={{ width: `${shieldPercentage}%` }}
-          ></div>
+          />
         </div>
       </div>
 
@@ -235,7 +237,6 @@ function LootOptionsPanel({
 }) {
   if (!lootOptions.length) return null
 
-  // Tableau des types d'action de loot disponibles dans l'enum GigaverseActionType
   const lootActions = [
     GigaverseActionType.PICK_LOOT_ONE,
     GigaverseActionType.PICK_LOOT_TWO,
@@ -251,19 +252,15 @@ function LootOptionsPanel({
       </div>
       <div className="grid gap-3 md:grid-cols-2">
         {lootOptions.map((loot, index) => {
-          // Utiliser les valeurs correctes de l'enum GigaverseActionType
           const moveType = lootActions[index]
           const isRecommended = recommendedMove === moveType
 
-          // Format the loot name and values
           const formattedLootName = formatLootType(loot.boonTypeString)
           const formattedValues = formatLootValues(
             loot.boonTypeString,
             loot.selectedVal1,
             loot.selectedVal2
           )
-
-          // Get the appropriate color class based on rarity
           const rarityColorClass = getRarityColorClass(loot.RARITY_CID)
 
           return (

@@ -1199,10 +1199,10 @@ packages:
     resolution: {integrity: sha512-tGSRP1QvsAvsJmnOlRQyw/mvK9gnPtjEc5fg2+m8n+QUa+D7rvrKkOYyfpy42GTs90X3RDOnqJgfHt+qO67/+w==}
 
   '@slkzgm/gigaverse-engine@0.0.5':
-    resolution: {integrity: sha512-+7LI9+rfEJrHza0utLEwmOWOd0T3kUh3hY2MLRNYn5hy2WU6VKS3AZtEfCeWA2eBEBCzkMJEBppp8oHVlmyOQw==}
+    resolution: {integrity: sha512-+7LI9+rfEJrHza0utLEwmOWOd0T3kUh3hY2MLRNYn5hy2WU6VKS3AZtEfCeWA2eBEBCzkMJEBppp8oHVlmyOQw==, tarball: https://npm.pkg.github.com/download/@slkzgm/gigaverse-engine/0.0.5/5c25ba83b10903b3e848e5240c939971bed298cb}
 
   '@slkzgm/gigaverse-sdk@0.0.8':
-    resolution: {integrity: sha512-mqLBUXjUmjVHNWNBxs2gF5gAjjU8srPIS77lSmKz5hS5e9SoTwv5CulCqpV8gLV7aDszI/QdjaKi5o0qNmBzCA==}
+    resolution: {integrity: sha512-eCgqlXVN77s6yxXsbffaCef70+WxKFFWRIgUBudX8eLSEeaWxh0IKlfVJXiv3taVrxCU9/70sv8WPd5RzwUvBw==, tarball: https://npm.pkg.github.com/download/@slkzgm/gigaverse-sdk/0.0.8/2222b0d29e75c33f2cd49db7dbb492e1b7c69914}
 
   '@socket.io/component-emitter@3.1.2':
     resolution: {integrity: sha512-9BCxFwvbGg/RsZK9tjXd8s4UcwR0MWeFQ1XEKIQVVvAGJyINdrqKMcTRyLoK8Rse1GjzLV9cwjWV1olXRWEXVA==}

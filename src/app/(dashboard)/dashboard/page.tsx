@@ -25,6 +25,7 @@ import { ActiveRunPanel } from '@/app/(dashboard)/_components/active-run-panel'
 import { DungeonList } from '@/app/(dashboard)/_components/dungeon-list'
 import { RunRecapPanel } from '@/app/(dashboard)/_components/run-recap-panel'
 import { RunHistoryPanel } from '@/app/(dashboard)/_components/run-history-panel'
+import { RomManagerPanel } from '@/app/(dashboard)/_components/rom-manager-panel'
 
 const mctsConfig = {
   simulationsCount: 300,
@@ -400,6 +401,7 @@ export default function DashboardPage() {
                 dungeonState={dungeonState}
                 finalEnemiesDefeated={finalEnemiesDefeated}
               />
+              <RomManagerPanel />
               <RunHistoryPanel />
             </div>
           </div>

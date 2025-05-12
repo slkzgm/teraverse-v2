@@ -24,8 +24,8 @@ importers:
         specifier: ^0.0.5
         version: 0.0.5
       '@slkzgm/gigaverse-sdk':
-        specifier: ^0.0.8
-        version: 0.0.8
+        specifier: ^0.0.9
+        version: 0.0.9
       '@tanstack/react-query':
         specifier: ^5.73.3
         version: 5.75.7(react@19.1.0)
@@ -1203,6 +1203,9 @@ packages:
 
   '@slkzgm/gigaverse-sdk@0.0.8':
     resolution: {integrity: sha512-eCgqlXVN77s6yxXsbffaCef70+WxKFFWRIgUBudX8eLSEeaWxh0IKlfVJXiv3taVrxCU9/70sv8WPd5RzwUvBw==, tarball: https://npm.pkg.github.com/download/@slkzgm/gigaverse-sdk/0.0.8/2222b0d29e75c33f2cd49db7dbb492e1b7c69914}
+
+  '@slkzgm/gigaverse-sdk@0.0.9':
+    resolution: {integrity: sha512-gRYnT/sXxnf4cW+1kOeflt7EXezW/NnOfUPN57rJ3UP1mMdoRMOHZ+cnRV2dOv07Bg08gt6miW4Ssb2Ah3UApw==, tarball: https://npm.pkg.github.com/download/@slkzgm/gigaverse-sdk/0.0.9/9b2c93ba275a9d40f36c96c619a2183e385188b4}
 
   '@socket.io/component-emitter@3.1.2':
     resolution: {integrity: sha512-9BCxFwvbGg/RsZK9tjXd8s4UcwR0MWeFQ1XEKIQVVvAGJyINdrqKMcTRyLoK8Rse1GjzLV9cwjWV1olXRWEXVA==}
@@ -6130,6 +6133,8 @@ snapshots:
       lodash: 4.17.21
 
   '@slkzgm/gigaverse-sdk@0.0.8': {}
+
+  '@slkzgm/gigaverse-sdk@0.0.9': {}
 
   '@socket.io/component-emitter@3.1.2': {}
 

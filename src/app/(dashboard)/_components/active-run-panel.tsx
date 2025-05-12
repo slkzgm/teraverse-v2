@@ -37,6 +37,10 @@ export function ActiveRunPanel({ dungeonState, onPlayMove, recommendedMove }: Ac
 
   const isLootPhase = dungeonState.run.lootPhase && dungeonState.run.lootOptions?.length > 0
 
+  const rockCharges = player.rock?.currentCharges ?? 0
+  const paperCharges = player.paper?.currentCharges ?? 0
+  const scissorCharges = player.scissor?.currentCharges ?? 0
+
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-border bg-card p-4">
@@ -66,18 +70,21 @@ export function ActiveRunPanel({ dungeonState, onPlayMove, recommendedMove }: Ac
             <RecommendedButton
               isRecommended={recommendedMove === GigaverseActionType.MOVE_ROCK}
               onClick={() => onPlayMove(GigaverseActionType.MOVE_ROCK)}
+              disabled={rockCharges < 1}
             >
               {moveDisplayNames.rock}
             </RecommendedButton>
             <RecommendedButton
               isRecommended={recommendedMove === GigaverseActionType.MOVE_PAPER}
               onClick={() => onPlayMove(GigaverseActionType.MOVE_PAPER)}
+              disabled={paperCharges < 1}
             >
               {moveDisplayNames.paper}
             </RecommendedButton>
             <RecommendedButton
               isRecommended={recommendedMove === GigaverseActionType.MOVE_SCISSOR}
               onClick={() => onPlayMove(GigaverseActionType.MOVE_SCISSOR)}
+              disabled={scissorCharges < 1}
             >
               {moveDisplayNames.scissor}
             </RecommendedButton>
@@ -91,17 +98,19 @@ export function ActiveRunPanel({ dungeonState, onPlayMove, recommendedMove }: Ac
 function RecommendedButton({
   isRecommended,
   onClick,
+  disabled,
   children,
   className = '',
 }: {
   isRecommended: boolean
   onClick: () => void
+  disabled?: boolean
   children: React.ReactNode
   className?: string
 }) {
   return (
     <div className="relative">
-      {isRecommended && (
+      {isRecommended && !disabled && (
         <div className="absolute -left-2 -top-2 z-10">
           <Star className="h-5 w-5 fill-yellow-400 text-yellow-400" />
         </div>
@@ -112,6 +121,7 @@ function RecommendedButton({
           isRecommended ? 'border-2 border-yellow-400' : ''
         } ${className}`}
         onClick={onClick}
+        disabled={disabled}
       >
         {children}
       </Button>

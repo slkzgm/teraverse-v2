@@ -1,4 +1,5 @@
 // path: src/actions/gigaverseActions.ts
+
 'use server'
 
 import {
@@ -9,6 +10,9 @@ import {
   GetDungeonTodayResponse,
   GetOffchainStaticResponse,
   StartRunPayload,
+  GetUserRomsResponse,
+  ClaimRomPayload,
+  ClaimRomResponse,
 } from '@slkzgm/gigaverse-sdk'
 import {
   GetEnergyResponse,
@@ -47,6 +51,7 @@ export async function validateTokenAction(token: string): Promise<{
         error: 'getUserMe() returned no address',
       }
     }
+
     if (!userData.canEnterGame) {
       return {
         success: false,
@@ -77,7 +82,7 @@ export async function validateTokenAction(token: string): Promise<{
         }
       }
     } catch (fetchErr) {
-      // We can allow partial success here
+      // Partial success
       return {
         success: true,
         address: userData.address,
@@ -293,4 +298,27 @@ export async function getOffchainStaticAction(token: string): Promise<GetOffchai
 export async function getDungeonTodayAction(token: string): Promise<GetDungeonTodayResponse> {
   const client = createClient(token)
   return client.getDungeonToday()
+}
+
+/**
+ * Retrieves all ROMs associated with the given address.
+ */
+export async function getUserRoms(token: string, address: string): Promise<GetUserRomsResponse> {
+  console.info(`[gigaverseActions] Fetching user ROMs for address: ${address}`)
+  const client = createClient(token)
+  const response = await client.getUserRoms(address)
+  return response
+}
+
+/**
+ * Claims a resource (e.g. "energy", "shard", "dust") for a specific ROM.
+ */
+export async function claimRom(token: string, payload: ClaimRomPayload): Promise<ClaimRomResponse> {
+  console.info(
+    `[gigaverseActions] Claiming resource for ROM: ${payload.romId} -> ${payload.claimId}`
+  )
+  const client = createClient(token)
+  const response = await client.claimRom(payload)
+  console.info(`[gigaverseActions] Claim result => success: ${response.success}`)
+  return response
 }

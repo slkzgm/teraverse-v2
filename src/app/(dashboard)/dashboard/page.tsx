@@ -11,6 +11,9 @@ import { useGameDataStore } from '@/store/useGameDataStore'
 import {
   buildGigaverseRunState,
   MctsAlgorithm,
+  MinimaxAlgorithm,
+  DPAlgorithm,
+  GreedyAlgorithm,
   GigaverseActionType,
 } from '@slkzgm/gigaverse-engine'
 import { silentLogger } from '@/utils/silentLogger'
@@ -24,13 +27,8 @@ import { AlgorithmSelector } from '@/app/(dashboard)/_components/algorithm-selec
 import { ActiveRunPanel } from '@/app/(dashboard)/_components/active-run-panel'
 import { DungeonList } from '@/app/(dashboard)/_components/dungeon-list'
 import { RunRecapPanel } from '@/app/(dashboard)/_components/run-recap-panel'
-import { RunHistoryPanel } from '@/app/(dashboard)/_components/run-history-panel'
 import { RomManagerPanel } from '@/app/(dashboard)/_components/rom-manager-panel'
-
-const mctsConfig = {
-  simulationsCount: 300,
-  maxDepth: 2,
-}
+import { RunHistoryPanel } from '@/app/(dashboard)/_components/run-history-panel'
 
 export default function DashboardPage() {
   const { bearerToken } = useAuthStore()
@@ -64,10 +62,22 @@ export default function DashboardPage() {
   const [currentDungeonName, setCurrentDungeonName] = useState('')
   const [currentDungeonIsJuiced, setCurrentDungeonIsJuiced] = useState(false)
 
+  const algoRefs = useRef<{
+    mcts: MctsAlgorithm | null
+    minimax: MinimaxAlgorithm | null
+    dp: DPAlgorithm | null
+    greedy: GreedyAlgorithm | null
+  }>({
+    mcts: null,
+    minimax: null,
+    dp: null,
+    greedy: null,
+  })
+
+  const isAutoPlayingRef = useRef(false)
+
   const currentDungeonNameRef = useRef('')
   const currentDungeonIsJuicedRef = useRef(false)
-  const mctsRef = useRef<MctsAlgorithm | null>(null)
-  const isAutoPlayingRef = useRef(false)
   const autoPlayRef = useRef(autoPlay)
 
   useEffect(() => {
@@ -77,10 +87,30 @@ export default function DashboardPage() {
   }, [currentDungeonName, currentDungeonIsJuiced, autoPlay])
 
   useEffect(() => {
-    if (selectedAlgorithm === 'mcts') {
-      mctsRef.current = new MctsAlgorithm(mctsConfig, silentLogger)
-    } else {
-      mctsRef.current = null
+    algoRefs.current.mcts = null
+    algoRefs.current.minimax = null
+    algoRefs.current.dp = null
+    algoRefs.current.greedy = null
+
+    switch (selectedAlgorithm) {
+      case 'mcts':
+        algoRefs.current.mcts = new MctsAlgorithm(
+          { simulationsCount: 300, maxDepth: 2 },
+          silentLogger
+        )
+        break
+      case 'minimax':
+        algoRefs.current.minimax = new MinimaxAlgorithm({ maxDepth: 3 }, silentLogger)
+        break
+      case 'dp':
+        algoRefs.current.dp = new DPAlgorithm({ maxHorizon: 4 }, silentLogger)
+        break
+      case 'greedy':
+        algoRefs.current.greedy = new GreedyAlgorithm({ atkWeight: 2.0 }, silentLogger)
+        break
+      // 'manual' has no special instantiation
+      default:
+        break
     }
   }, [selectedAlgorithm])
 
@@ -162,18 +192,29 @@ export default function DashboardPage() {
         enemiesDefeated: finalEnemies,
         timestamp: Date.now(),
         itemChanges,
+        algorithmUsed: selectedAlgorithm,
       })
       await refreshDungeon()
       return true
     }
     return false
-  }, [address, username, noobId, getAggregatedItemChanges, refreshDungeon, setAutoPlay, addRun])
+  }, [
+    address,
+    username,
+    noobId,
+    getAggregatedItemChanges,
+    refreshDungeon,
+    setAutoPlay,
+    addRun,
+    selectedAlgorithm,
+  ])
 
   const getRecommendedMove = useCallback((): GigaverseActionType | null => {
     const ds = useGigaverseStore.getState().dungeonState
-    if (!ds) return null
+    if (!ds?.run) return null
     if (selectedAlgorithm === 'manual') return null
 
+    // Random: pick any valid move at random.
     if (selectedAlgorithm === 'random') {
       const possible: GigaverseActionType[] = []
       if (ds.run?.lootPhase && ds.run.lootOptions?.length) {
@@ -196,15 +237,27 @@ export default function DashboardPage() {
       return possible[Math.floor(Math.random() * possible.length)]
     }
 
-    if (selectedAlgorithm === 'mcts' && mctsRef.current) {
-      try {
-        if (!ds.run) return null
-        const actionData = buildGigaverseRunState(ds, useGameDataStore.getState().enemies)
-        return mctsRef.current.pickAction(actionData).type
-      } catch (error) {
-        console.error('[DashboardPage] MCTS error:', error)
-        return null
-      }
+    // Build the engine-friendly state
+    const actionData = buildGigaverseRunState(ds, useGameDataStore.getState().enemies)
+
+    // MCTS
+    if (selectedAlgorithm === 'mcts' && algoRefs.current.mcts) {
+      return algoRefs.current.mcts.pickAction(actionData).type
+    }
+
+    // Minimax
+    if (selectedAlgorithm === 'minimax' && algoRefs.current.minimax) {
+      return algoRefs.current.minimax.pickAction(actionData).type
+    }
+
+    // DP
+    if (selectedAlgorithm === 'dp' && algoRefs.current.dp) {
+      return algoRefs.current.dp.pickAction(actionData).type
+    }
+
+    // Greedy
+    if (selectedAlgorithm === 'greedy' && algoRefs.current.greedy) {
+      return algoRefs.current.greedy.pickAction(actionData).type
     }
 
     return null
@@ -239,13 +292,16 @@ export default function DashboardPage() {
     isAutoPlayingRef.current = true
 
     try {
-      let steps = 60
+      // Safety cap to avoid infinite loops
+      let steps = 600
       while (autoPlayRef.current && steps > 0) {
         if (await checkRunOverAndRefresh()) break
         const move = getRecommendedMove()
+        // Stop if the algorithm has no move (like in the middle of manual usage)
         if (!move) break
+
         await handlePlayMove(move)
-        await new Promise((res) => setTimeout(res, 50))
+        await new Promise((res) => setTimeout(res, 40)) // short delay
         steps--
       }
       await checkRunOverAndRefresh()
@@ -255,6 +311,12 @@ export default function DashboardPage() {
       isAutoPlayingRef.current = false
     }
   }, [checkRunOverAndRefresh, getRecommendedMove, handlePlayMove])
+
+  useEffect(() => {
+    if (autoPlay && !isAutoPlayingRef.current) {
+      runAutoPlayChain()
+    }
+  }, [autoPlay, runAutoPlayChain])
 
   async function handleStartRun(dungeonId: number, isJuiced: boolean) {
     if (!bearerToken) return
@@ -305,12 +367,6 @@ export default function DashboardPage() {
     }
   }
 
-  useEffect(() => {
-    if (autoPlay && !isAutoPlayingRef.current) {
-      runAutoPlayChain()
-    }
-  }, [autoPlay, runAutoPlayChain])
-
   let currentEnergyInt = 0
   let isPlayerJuiced = false
   if (energyData) {
@@ -350,6 +406,7 @@ export default function DashboardPage() {
           )}
 
           <div className="grid gap-6 md:grid-cols-2">
+            {/* Left column: Algorithm + Active run or dungeon list */}
             <div className="space-y-6">
               <AlgorithmSelector />
 
@@ -395,6 +452,7 @@ export default function DashboardPage() {
               )}
             </div>
 
+            {/* Right column: Recap, ROM manager, Run history */}
             <div className="space-y-6">
               <RunRecapPanel
                 changes={balanceChangesHistory}

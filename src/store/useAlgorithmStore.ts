@@ -3,7 +3,7 @@
 
 import { create } from 'zustand'
 
-type AlgorithmType = 'manual' | 'mcts' | 'random'
+type AlgorithmType = 'manual' | 'mcts' | 'minimax' | 'dp' | 'greedy' | 'random'
 
 interface AlgorithmState {
   selectedAlgorithm: AlgorithmType
@@ -17,7 +17,7 @@ export const useAlgorithmStore = create<AlgorithmState>((set) => ({
   autoPlay: false,
 
   setAlgorithm: (algo) => {
-    set({ selectedAlgorithm: algo })
+    set({ selectedAlgorithm: algo, autoPlay: false })
   },
 
   setAutoPlay: (val) => {

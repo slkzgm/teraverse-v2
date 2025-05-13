@@ -14,6 +14,7 @@ export interface RunRecapEntry {
   enemiesDefeated: number
   timestamp: number
   itemChanges: Record<number, number>
+  algorithmUsed: 'manual' | 'mcts' | 'minimax' | 'dp' | 'greedy' | 'random'
 }
 
 interface RunHistoryState {

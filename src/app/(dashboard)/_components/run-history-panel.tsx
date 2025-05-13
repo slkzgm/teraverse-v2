@@ -36,6 +36,7 @@ export function RunHistoryPanel() {
           Clear
         </Button>
       </div>
+
       <div className="max-h-[400px] space-y-3 overflow-y-auto pr-1">
         {sortedRuns.map((run, index) => (
           <div key={index} className="rounded-md border border-border bg-background p-3">
@@ -53,6 +54,7 @@ export function RunHistoryPanel() {
                 {new Date(run.timestamp).toLocaleString()}
               </span>
             </div>
+
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
               <div>
                 <span className="text-muted-foreground">Player:</span>{' '}
@@ -61,6 +63,10 @@ export function RunHistoryPanel() {
               <div>
                 <span className="text-muted-foreground">Enemies:</span>{' '}
                 <span className="font-medium">{run.enemiesDefeated}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Algorithm:</span>{' '}
+                <span className="font-medium">{(run.algorithmUsed ?? 'manual').toUpperCase()}</span>
               </div>
             </div>
           </div>

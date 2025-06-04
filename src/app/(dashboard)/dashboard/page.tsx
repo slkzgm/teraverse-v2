@@ -28,7 +28,7 @@ import { ActiveRunPanel } from '@/app/(dashboard)/_components/active-run-panel'
 import { DungeonList } from '@/app/(dashboard)/_components/dungeon-list'
 import { RunRecapPanel } from '@/app/(dashboard)/_components/run-recap-panel'
 import { RomManagerPanel } from '@/app/(dashboard)/_components/rom-manager-panel'
-import { RunHistoryPanel } from '@/app/(dashboard)/_components/run-history-panel'
+import { RunTabsPanel } from '@/app/(dashboard)/_components/run-tabs-panel'
 
 export default function DashboardPage() {
   const { bearerToken } = useAuthStore()
@@ -460,7 +460,7 @@ export default function DashboardPage() {
                 finalEnemiesDefeated={finalEnemiesDefeated}
               />
               <RomManagerPanel />
-              <RunHistoryPanel />
+              <RunTabsPanel />
             </div>
           </div>
         </>

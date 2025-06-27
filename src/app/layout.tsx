@@ -5,6 +5,7 @@ import { Space_Grotesk, Audiowide } from 'next/font/google'
 import './globals.css'
 import { Toaster } from '@/components/ui/sonner'
 import { Providers } from '@/components/providers'
+import { NotificationBanner } from '@/components/ui/notification-banner'
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ['latin'],
@@ -34,6 +35,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body className={`font-sans ${spaceGrotesk.className}`}>
         <Providers>
+          <NotificationBanner />
           {children}
           <Toaster />
         </Providers>
